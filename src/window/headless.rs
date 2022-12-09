@@ -112,22 +112,7 @@ fn build_context<T1: ContextCurrentState>(
 fn build_context<T1: ContextCurrentState>(
     cb: ContextBuilder<T1>,
 ) -> Result<(glutin::Context<NotCurrent>, EventLoop<()>), CreationError> {
-    /*use glutin::platform::windows::EventLoopExtWindows;
+    use glutin::platform::windows::EventLoopExtWindows;
     let el = EventLoopExtWindows::new_any_thread();
-    build_context_headless(cb.clone(), &el).map(|ctx| (ctx, el));*/
-
-    use winit::event_loop::EventLoopBuilder;
-    use glutin::platform::windows::EventLoopBuilderExtWindows;
-
-    let mut builder = EventLoopBuilder::new();
-    builder.with_any_thread(true);
-    let el = builder.build();
-
-    match build_context_headless(cb.clone(), &el).map(|ctx| (ctx, el)) {
-        Err(error) => {
-            println!("error building context: {:?}", error);
-            return Err(error);
-        },
-        Ok(value) => return Ok(value),
-    }
+    build_context_headless(cb.clone(), &el).map(|ctx| (ctx, el))
 }
