@@ -151,6 +151,60 @@ impl<'a> RenderTarget<'a> {
     }
 
     ///
+    /// Returns the colors of the pixels in this render target's framebuffer.
+    /// The number of channels per pixel and the data format for each channel is specified by the generic parameter.
+    ///
+    /// **Note:** On web, the data format needs to match the data format of the color texture.
+    ///
+    pub fn read_framebuffer<T: TextureDataType>(&self, flipy: bool) -> Vec<T> {
+        self.read_framebuffer_partially(self.scissor_box(), flipy)
+    }
+
+    ///
+    /// Returns the colors of the pixels in this render target's framebuffer inside the given scissor box.
+    /// The number of channels per pixel and the data format for each channel is specified by the generic parameter.
+    ///
+    /// **Note:** On web, the data format needs to match the data format of the color texture.
+    ///
+    pub fn read_framebuffer_partially<T: TextureDataType>(&self, scissor_box: ScissorBox, flipy: bool) -> Vec<T> {
+        if self.id.is_none() {
+            panic!("cannot read color from undefined framebuffer");
+        }
+        self.bind(crate::context::DRAW_FRAMEBUFFER);
+        self.bind(crate::context::READ_FRAMEBUFFER);
+        let mut data_size = std::mem::size_of::<T>();
+        // On web, the format needs to be RGBA if the data type is byte.
+        if data_size / T::size() as usize == 1 {
+            data_size *= 4 / T::size() as usize
+        }
+        let mut bytes =
+            vec![0u8; scissor_box.width as usize * scissor_box.height as usize * data_size];
+        unsafe {
+            self.context.read_pixels(
+                scissor_box.x as i32,
+                scissor_box.y as i32,
+                scissor_box.width as i32,
+                scissor_box.height as i32,
+                format_from_data_type::<T>(),
+                T::data_type(),
+                crate::context::PixelPackData::Slice(&mut bytes),
+            );
+        }
+        let mut pixels = from_byte_slice(&bytes).to_vec();
+
+        if !flipy {
+            return pixels;
+        }
+
+        flip_y(
+            &mut pixels,
+            scissor_box.width as usize,
+            scissor_box.height as usize,
+        );
+        pixels
+    }
+
+    ///
     /// Returns the depth values in this render target.
     ///
     #[cfg(not(target_arch = "wasm32"))]

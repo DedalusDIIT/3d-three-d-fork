@@ -37,6 +37,7 @@ pub use three_d_asset::texture::{
 /// The basic data type used for each channel of each pixel in a texture.
 pub trait TextureDataType: DataType {}
 impl TextureDataType for u8 {}
+impl TextureDataType for u16 {}
 impl TextureDataType for f16 {}
 impl TextureDataType for f32 {}
 
