@@ -9,8 +9,10 @@ mod settings;
 #[doc(inline)]
 pub use settings::*;
 
+#[cfg(feature = "winit")]
 mod winit_window;
 #[doc(inline)]
+#[cfg(feature = "winit")]
 pub use winit_window::*;
 
 #[cfg(not(target_arch = "wasm32"))]
