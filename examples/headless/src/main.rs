@@ -1,6 +1,12 @@
+use std::thread;
+
 use three_d::*;
 
 fn main() {
+    thread::spawn(thread_main).join().expect("couldn't join thread");
+}
+
+fn thread_main() {
     let viewport = Viewport::new_at_origo(1280, 720);
 
     // Create a headless graphics context
