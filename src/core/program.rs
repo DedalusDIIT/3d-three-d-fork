@@ -1,6 +1,7 @@
 use crate::core::*;
 use std::collections::HashMap;
 use std::sync::RwLock;
+use crate::context::Texture;
 
 ///
 /// A shader program consisting of a programmable vertex shader followed by a programmable fragment shader.
@@ -184,6 +185,22 @@ impl Program {
             "the uniform {} is sent to the shader but not defined or never used",
             name
         ))
+    }
+
+    ///
+    /// Use the given [Texture] in this shader program and associate it with the given named variable.
+    /// The glsl shader variable must be of suitable type for the underlying Texture and can only be accessed in the fragment shader.
+    ///
+    /// # Panic
+    /// Will panic if the texture is not defined in the shader code or not used.
+    /// In the latter case the variable is removed by the shader compiler.
+    ///
+    pub fn use_texture_id(&self, name: &str, texture: Texture, target: u32) {
+        self.use_texture_internal(name);
+        unsafe {
+            self.context
+                .bind_texture(target, Some(texture));
+        }
     }
 
     ///
