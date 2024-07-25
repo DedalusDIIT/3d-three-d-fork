@@ -66,7 +66,7 @@ impl Program {
 
             if !context.get_program_link_status(id) {
                 let log = context.get_shader_info_log(vert_shader);
-                if log.len() > 0 {
+                if !log.is_empty() {
                     Err(CoreError::ShaderCompilation(
                         "vertex".to_string(),
                         log,
@@ -74,7 +74,7 @@ impl Program {
                     ))?;
                 }
                 let log = context.get_shader_info_log(frag_shader);
-                if log.len() > 0 {
+                if !log.is_empty() {
                     Err(CoreError::ShaderCompilation(
                         "fragment".to_string(),
                         log,
@@ -82,7 +82,7 @@ impl Program {
                     ))?;
                 }
                 let log = context.get_program_info_log(id);
-                if log.len() > 0 {
+                if !log.is_empty() {
                     Err(CoreError::ShaderLink(log))?;
                 }
                 unreachable!();
@@ -97,17 +97,13 @@ impl Program {
             let num_attribs = context.get_active_attributes(id);
             let mut attributes = HashMap::new();
             for i in 0..num_attribs {
-                if let Some(crate::context::ActiveAttribute { name, .. }) =
-                    context.get_active_attribute(id, i)
+                if let Some(crate::context::ActiveAttribute { name, .. }) = context
+                    .get_active_attribute(id, i)
+                    .filter(|a| !a.name.starts_with("gl_"))
                 {
-                    let location = context
-                        .get_attrib_location(id, &name)
-                        .expect(&format!("Could not get the location of uniform {}", name));
-                    /*println!(
-                        "Attribute location: {}, name: {}, type: {}, size: {}",
-                        location, name, atype, size
-                    );*/
-                    attributes.insert(name, location);
+                    if let Some(location) = context.get_attrib_location(id, &name) {
+                        attributes.insert(name, location);
+                    }
                 }
             }
 
@@ -115,15 +111,12 @@ impl Program {
             let num_uniforms = context.get_active_uniforms(id);
             let mut uniforms = HashMap::new();
             for i in 0..num_uniforms {
-                if let Some(crate::context::ActiveUniform { name, .. }) =
-                    context.get_active_uniform(id, i)
+                if let Some(crate::context::ActiveUniform { name, .. }) = context
+                    .get_active_uniform(id, i)
+                    .filter(|a| !a.name.starts_with("gl_"))
                 {
                     if let Some(location) = context.get_uniform_location(id, &name) {
-                        let name = name.split('[').collect::<Vec<_>>()[0].to_string();
-                        /*println!(
-                            "Uniform location: {:?}, name: {}, type: {}, size: {}",
-                            location, name, utype, size
-                        );*/
+                        let name = name.split('[').next().unwrap().to_string();
                         uniforms.insert(name, location);
                     }
                 }
@@ -181,10 +174,12 @@ impl Program {
 
     fn get_uniform_location(&self, name: &str) -> &crate::context::UniformLocation {
         self.use_program();
-        self.uniforms.get(name).expect(&format!(
-            "the uniform {} is sent to the shader but not defined or never used",
-            name
-        ))
+        self.uniforms.get(name).unwrap_or_else(|| {
+            panic!(
+                "the uniform {} is sent to the shader but not defined or never used",
+                name
+            )
+        })
     }
 
     ///
@@ -294,13 +289,24 @@ impl Program {
         texture.bind();
     }
 
+    ///
+    /// Use this function if you want to use a texture which was created using low-level context calls and not using the functionality in the [texture] module.
+    /// This function is only needed in special cases for example if you have a special source of texture data.
+    ///
+    pub fn use_raw_texture(&self, name: &str, target: u32, id: crate::context::Texture) {
+        self.use_texture_internal(name);
+        unsafe {
+            self.context.bind_texture(target, Some(id));
+        }
+    }
+
     fn use_texture_internal(&self, name: &str) -> u32 {
         if !self.textures.read().unwrap().contains_key(name) {
             let mut map = self.textures.write().unwrap();
             let index = map.len() as u32;
             map.insert(name.to_owned(), index);
         };
-        let index = self.textures.read().unwrap().get(name).unwrap().clone();
+        let index = *self.textures.read().unwrap().get(name).unwrap();
         self.use_uniform(name, index as i32);
         unsafe {
             self.context
@@ -318,21 +324,13 @@ impl Program {
             let location = unsafe {
                 self.context
                     .get_uniform_block_index(self.id, name)
-                    .expect(&format!(
-                        "the uniform block {} is sent to the shader but not defined or never used",
-                        name
-                    ))
+                    .unwrap_or_else(|| panic!("the uniform block {} is sent to the shader but not defined or never used",
+                        name))
             };
             let index = map.len() as u32;
             map.insert(name.to_owned(), (location, index));
         };
-        let (location, index) = self
-            .uniform_blocks
-            .read()
-            .unwrap()
-            .get(name)
-            .unwrap()
-            .clone();
+        let (location, index) = *self.uniform_blocks.read().unwrap().get(name).unwrap();
         unsafe {
             self.context.uniform_block_binding(self.id, location, index);
             buffer.bind(index);
@@ -357,14 +355,31 @@ impl Program {
             unsafe {
                 self.context.bind_vertex_array(Some(self.context.vao));
                 self.context.enable_vertex_attrib_array(loc);
-                self.context.vertex_attrib_pointer_f32(
-                    loc,
-                    buffer.data_size() as i32,
-                    buffer.data_type(),
-                    false,
-                    0,
-                    0,
-                );
+                if !buffer.normalized()
+                    && (buffer.data_type() == crate::context::UNSIGNED_BYTE
+                        || buffer.data_type() == crate::context::BYTE
+                        || buffer.data_type() == crate::context::UNSIGNED_SHORT
+                        || buffer.data_type() == crate::context::SHORT
+                        || buffer.data_type() == crate::context::UNSIGNED_INT
+                        || buffer.data_type() == crate::context::INT)
+                {
+                    self.context.vertex_attrib_pointer_i32(
+                        loc,
+                        buffer.data_size() as i32,
+                        buffer.data_type(),
+                        0,
+                        0,
+                    );
+                } else {
+                    self.context.vertex_attrib_pointer_f32(
+                        loc,
+                        buffer.data_size() as i32,
+                        buffer.data_type(),
+                        buffer.normalized(),
+                        0,
+                        0,
+                    );
+                }
                 self.context.vertex_attrib_divisor(loc, 0);
                 self.context.bind_buffer(crate::context::ARRAY_BUFFER, None);
             }
@@ -388,14 +403,31 @@ impl Program {
             unsafe {
                 self.context.bind_vertex_array(Some(self.context.vao));
                 self.context.enable_vertex_attrib_array(loc);
-                self.context.vertex_attrib_pointer_f32(
-                    loc,
-                    buffer.data_size() as i32,
-                    buffer.data_type(),
-                    false,
-                    0,
-                    0,
-                );
+                if !buffer.normalized()
+                    && (buffer.data_type() == crate::context::UNSIGNED_BYTE
+                        || buffer.data_type() == crate::context::BYTE
+                        || buffer.data_type() == crate::context::UNSIGNED_SHORT
+                        || buffer.data_type() == crate::context::SHORT
+                        || buffer.data_type() == crate::context::UNSIGNED_INT
+                        || buffer.data_type() == crate::context::INT)
+                {
+                    self.context.vertex_attrib_pointer_i32(
+                        loc,
+                        buffer.data_size() as i32,
+                        buffer.data_type(),
+                        0,
+                        0,
+                    );
+                } else {
+                    self.context.vertex_attrib_pointer_f32(
+                        loc,
+                        buffer.data_size() as i32,
+                        buffer.data_type(),
+                        buffer.normalized(),
+                        0,
+                        0,
+                    );
+                }
                 self.context.vertex_attrib_divisor(loc, 1);
                 self.context.bind_buffer(crate::context::ARRAY_BUFFER, None);
             }
@@ -602,10 +634,12 @@ impl Program {
 
     fn location(&self, name: &str) -> u32 {
         self.use_program();
-        *self.attributes.get(name).expect(&format!(
-            "the attribute {} is sent to the shader but not defined or never used",
-            name
-        ))
+        *self.attributes.get(name).unwrap_or_else(|| {
+            panic!(
+                "the attribute {} is sent to the shader but not defined or never used",
+                name
+            )
+        })
     }
 
     fn use_program(&self) {

@@ -11,7 +11,6 @@ use three_d::*;
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "Lights!".to_string(),
-        min_size: (512, 512),
         max_size: Some((1280, 720)),
         ..Default::default()
     })
@@ -55,7 +54,7 @@ pub async fn run() {
     let mut lights = Vec::new();
 
     // main loop
-    let mut intensity = 1.0;
+    let mut intensity = 3.0;
     let mut constant = 0.0;
     let mut linear = 0.5;
     let mut quadratic = 0.5;
@@ -83,8 +82,14 @@ pub async fn run() {
                             .text("Attenuation quadratic"),
                     );
                     ui.color_edit_button_rgba_unmultiplied(&mut color);
+
+                    ui.label("Tone mapping");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::None, "None");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::Reinhard, "Reinhard");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::Aces, "Aces");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::Filmic, "Filmic");
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = gui_context.used_rect().width();
             },
         );
         while lights.len() < light_count {
@@ -97,7 +102,7 @@ pub async fn run() {
         for light in lights.iter_mut() {
             light.set_light(
                 intensity,
-                Color::from_rgba_slice(&color),
+                Srgba::from(color),
                 Attenuation {
                     constant,
                     linear,
@@ -125,9 +130,8 @@ pub async fn run() {
                 lights.iter().map(|l| l.object()).chain(&model),
                 &lights.iter().map(|l| l.light()).collect::<Vec<_>>(),
             )
-            .write(|| {
-                gui.render();
-            });
+            .write(|| gui.render())
+            .unwrap();
 
         FrameOutput::default()
     });
@@ -150,7 +154,7 @@ impl Glow {
         );
         Self {
             aabb,
-            light: PointLight::new(&context, 1.0, Color::WHITE, &pos, Attenuation::default()),
+            light: PointLight::new(&context, 1.0, Srgba::WHITE, &pos, Attenuation::default()),
             velocity: vec3(
                 rng.gen::<f32>() * 2.0 - 1.0,
                 rng.gen::<f32>() * 2.0 - 1.0,
@@ -164,12 +168,11 @@ impl Glow {
         }
     }
 
-    pub fn set_light(&mut self, intensity: f32, color: Color, attenuation: Attenuation) {
+    pub fn set_light(&mut self, intensity: f32, color: Srgba, attenuation: Attenuation) {
         self.light.color = color;
         self.light.intensity = intensity;
         self.light.attenuation = attenuation;
-        let c = color.to_vec4() * intensity;
-        self.sphere.material.emissive = Color::from_rgba_slice(&[c.x, c.y, c.z, c.w]);
+        self.sphere.material.emissive = color;
     }
 
     pub fn update(&mut self, delta: f32) {

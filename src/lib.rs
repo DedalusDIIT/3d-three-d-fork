@@ -1,5 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//#![warn(clippy::all)]
+#![warn(clippy::all)]
+#![allow(clippy::too_many_arguments)]
 #![warn(missing_docs)]
 #![warn(unsafe_code)]
 //!
@@ -15,11 +16,10 @@ pub mod core;
 pub mod renderer;
 pub use renderer::*;
 
-#[cfg(feature = "window")]
-#[cfg_attr(docsrs, doc(feature = "window"))]
 pub mod window;
-#[cfg(feature = "window")]
+#[allow(unused_imports)]
 pub use window::*;
 
 mod gui;
+#[allow(unused_imports)]
 pub use gui::*;

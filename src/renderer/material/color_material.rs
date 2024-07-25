@@ -1,6 +1,5 @@
 use crate::core::*;
 use crate::renderer::*;
-use std::sync::Arc;
 
 ///
 /// A material that renders a [Geometry] in a color defined by multiplying a color with an optional texture and optional per vertex colors.
@@ -8,10 +7,11 @@ use std::sync::Arc;
 ///
 #[derive(Clone, Default)]
 pub struct ColorMaterial {
-    /// Base surface color. Assumed to be in linear color space.
-    pub color: Color,
+    /// Base surface color.
+    pub color: Srgba,
     /// An optional texture which is samples using uv coordinates (requires that the [Geometry] supports uv coordinates).
-    pub texture: Option<Arc<Texture2D>>,
+    /// The colors are assumed to be in linear sRGB (`RgbU8`), linear sRGB with an alpha channel (`RgbaU8`) or HDR color space.
+    pub texture: Option<Texture2DRef>,
     /// Render states.
     pub render_states: RenderStates,
     /// Whether this material should be treated as a transparent material (An object needs to be rendered differently depending on whether it is transparent or opaque).
@@ -34,11 +34,18 @@ impl ColorMaterial {
 
     /// Constructs a new opaque color material from a [CpuMaterial].
     pub fn new_opaque(context: &Context, cpu_material: &CpuMaterial) -> Self {
-        let texture = if let Some(ref cpu_texture) = cpu_material.albedo_texture {
-            Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-        } else {
-            None
-        };
+        let texture =
+            cpu_material
+                .albedo_texture
+                .as_ref()
+                .map(|cpu_texture| match &cpu_texture.data {
+                    TextureData::RgbU8(_) | TextureData::RgbaU8(_) => {
+                        let mut cpu_texture = cpu_texture.clone();
+                        cpu_texture.data.to_linear_srgb();
+                        Texture2DRef::from_cpu_texture(context, &cpu_texture)
+                    }
+                    _ => Texture2DRef::from_cpu_texture(context, cpu_texture),
+                });
         Self {
             color: cpu_material.albedo,
             texture,
@@ -49,11 +56,18 @@ impl ColorMaterial {
 
     /// Constructs a new transparent color material from a [CpuMaterial].
     pub fn new_transparent(context: &Context, cpu_material: &CpuMaterial) -> Self {
-        let texture = if let Some(ref cpu_texture) = cpu_material.albedo_texture {
-            Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-        } else {
-            None
-        };
+        let texture =
+            cpu_material
+                .albedo_texture
+                .as_ref()
+                .map(|cpu_texture| match &cpu_texture.data {
+                    TextureData::RgbU8(_) | TextureData::RgbaU8(_) => {
+                        let mut cpu_texture = cpu_texture.clone();
+                        cpu_texture.data.to_linear_srgb();
+                        Texture2DRef::from_cpu_texture(context, &cpu_texture)
+                    }
+                    _ => Texture2DRef::from_cpu_texture(context, cpu_texture),
+                });
         Self {
             color: cpu_material.albedo,
             texture,
@@ -84,21 +98,38 @@ impl FromCpuMaterial for ColorMaterial {
 }
 
 impl Material for ColorMaterial {
-    fn fragment_shader_source(&self, use_vertex_colors: bool, _lights: &[&dyn Light]) -> String {
+    fn id(&self) -> u16 {
+        if self.texture.is_some() {
+            0b1u16 << 15
+        } else {
+            0b1u16 << 15 | 0b1u16
+        }
+    }
+
+    fn fragment_shader_source(&self, _lights: &[&dyn Light]) -> String {
         let mut shader = String::new();
         if self.texture.is_some() {
             shader.push_str("#define USE_TEXTURE\nin vec2 uvs;\n");
         }
-        if use_vertex_colors {
-            shader.push_str("#define USE_VERTEX_COLORS\nin vec4 col;\n");
-        }
         shader.push_str(include_str!("../../core/shared.frag"));
+        shader.push_str(ColorMapping::fragment_shader_source());
         shader.push_str(include_str!("shaders/color_material.frag"));
         shader
     }
-    fn use_uniforms(&self, program: &Program, _camera: &Camera, _lights: &[&dyn Light]) {
-        program.use_uniform("surfaceColor", self.color);
+
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            color: true,
+            uv: self.texture.is_some(),
+            ..FragmentAttributes::NONE
+        }
+    }
+
+    fn use_uniforms(&self, program: &Program, camera: &Camera, _lights: &[&dyn Light]) {
+        camera.color_mapping.use_uniforms(program);
+        program.use_uniform("surfaceColor", self.color.to_linear_srgb());
         if let Some(ref tex) = self.texture {
+            program.use_uniform("textureTransformation", tex.transformation);
             program.use_texture("tex", tex);
         }
     }

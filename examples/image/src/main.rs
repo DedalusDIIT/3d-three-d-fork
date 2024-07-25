@@ -17,6 +17,8 @@ pub async fn run() {
     .unwrap();
     let context = window.gl();
 
+    let mut camera = Camera::new_2d(window.viewport());
+
     // Source: https://polyhaven.com/
     let mut loaded = if let Ok(loaded) =
         three_d_asset::io::load_async(&["../assets/syferfontein_18d_clear_4k.hdr"]).await
@@ -29,15 +31,15 @@ pub async fn run() {
         .await
         .expect("failed to download the necessary assets, to enable running this example offline, place the relevant assets in a folder called 'assets' next to the three-d source")
     };
-    let image = Texture2D::new(&context, &loaded.deserialize("").unwrap());
+    let image = std::sync::Arc::new(Texture2D::new(&context, &loaded.deserialize("").unwrap()));
 
     let mut gui = GUI::new(&context);
 
     // main loop
-    let mut tone_mapping = 1.0;
     let mut texture_transform_scale = 1.0;
     let mut texture_transform_x = 0.0;
     let mut texture_transform_y = 0.0;
+    let mut tone_mapping = ToneMapping::default();
     window.render_loop(move |mut frame_input| {
         let mut panel_width = 0.0;
         gui.update(
@@ -49,7 +51,6 @@ pub async fn run() {
                 use three_d::egui::*;
                 SidePanel::right("side_panel").show(gui_context, |ui| {
                     ui.heading("Debug Panel");
-                    ui.add(Slider::new(&mut tone_mapping, 0.0..=50.0).text("Tone mapping"));
                     ui.add(
                         Slider::new(&mut texture_transform_scale, 0.0..=10.0)
                             .text("Texture transform scale"),
@@ -62,8 +63,13 @@ pub async fn run() {
                         Slider::new(&mut texture_transform_y, 0.0..=1.0)
                             .text("Texture transform y"),
                     );
+                    ui.label("Tone mapping");
+                    ui.radio_value(&mut tone_mapping, ToneMapping::None, "None");
+                    ui.radio_value(&mut tone_mapping, ToneMapping::Reinhard, "Reinhard");
+                    ui.radio_value(&mut tone_mapping, ToneMapping::Aces, "Aces");
+                    ui.radio_value(&mut tone_mapping, ToneMapping::Filmic, "Filmic");
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = gui_context.used_rect().width();
             },
         );
 
@@ -71,28 +77,48 @@ pub async fn run() {
             frame_input.viewport.width - (panel_width * frame_input.device_pixel_ratio) as u32,
             frame_input.viewport.height,
         );
+        camera.set_viewport(viewport);
 
-        frame_input.screen().clear(ClearState::default()).write(|| {
-            apply_effect(
-                &context,
-                include_str!("shader.frag"),
-                RenderStates::default(),
-                viewport,
-                |program| {
-                    program.use_texture("image", &image);
-                    program.use_uniform("parameter", tone_mapping);
-                    program.use_uniform(
-                        "textureTransform",
-                        Mat3::from_scale(texture_transform_scale)
-                            * Mat3::from_translation(vec2(
-                                texture_transform_x,
-                                texture_transform_y,
-                            )),
-                    )
-                },
-            );
-            gui.render();
-        });
+        let material = ColorMaterial {
+            texture: Some(Texture2DRef {
+                texture: image.clone(),
+                transformation: Mat3::from_scale(texture_transform_scale)
+                    * Mat3::from_translation(vec2(texture_transform_x, texture_transform_y)),
+            }),
+            ..Default::default()
+        };
+
+        let mut target = Texture2D::new_empty::<[f16; 4]>(
+            &context,
+            viewport.width,
+            viewport.height,
+            Interpolation::Nearest,
+            Interpolation::Nearest,
+            None,
+            Wrapping::ClampToEdge,
+            Wrapping::ClampToEdge,
+        );
+
+        camera.disable_tone_and_color_mapping();
+        target
+            .as_color_target(None)
+            .clear(ClearState::default())
+            .apply_screen_material(&material, &camera, &[]);
+
+        camera.color_mapping = ColorMapping::default();
+        camera.tone_mapping = tone_mapping;
+        frame_input
+            .screen()
+            .clear(ClearState::default())
+            .apply_screen_effect(
+                &ScreenEffect::default(),
+                &camera,
+                &[],
+                Some(ColorTexture::Single(&target)),
+                None,
+            )
+            .write(|| gui.render())
+            .unwrap();
 
         FrameOutput::default()
     });

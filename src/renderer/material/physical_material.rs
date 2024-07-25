@@ -1,6 +1,5 @@
 use crate::core::*;
 use crate::renderer::*;
-use std::sync::Arc;
 
 ///
 /// A physically-based material that renders a [Geometry] in an approximate correct physical manner based on Physically Based Rendering (PBR).
@@ -10,34 +9,36 @@ use std::sync::Arc;
 pub struct PhysicalMaterial {
     /// Name.
     pub name: String,
-    /// Albedo base color, also called diffuse color. Assumed to be in linear color space.
-    pub albedo: Color,
-    /// Texture with albedo base colors, also called diffuse color. Assumed to be in sRGB with or without an alpha channel.
-    pub albedo_texture: Option<Arc<Texture2D>>,
+    /// Albedo base color, also called diffuse color.
+    pub albedo: Srgba,
+    /// Texture with albedo base colors, also called diffuse color.
+    /// The colors are assumed to be in linear sRGB (`RgbU8`), linear sRGB with an alpha channel (`RgbaU8`) or HDR color space.
+    pub albedo_texture: Option<Texture2DRef>,
     /// A value in the range `[0..1]` specifying how metallic the surface is.
     pub metallic: f32,
     /// A value in the range `[0..1]` specifying how rough the surface is.
     pub roughness: f32,
     /// Texture containing the metallic and roughness parameters which are multiplied with the [Self::metallic] and [Self::roughness] values in the shader.
     /// The metallic values are sampled from the blue channel and the roughness from the green channel.
-    pub metallic_roughness_texture: Option<Arc<Texture2D>>,
+    pub metallic_roughness_texture: Option<Texture2DRef>,
     /// A scalar multiplier controlling the amount of occlusion applied from the [Self::occlusion_texture]. A value of 0.0 means no occlusion. A value of 1.0 means full occlusion.
     pub occlusion_strength: f32,
     /// An occlusion map. Higher values indicate areas that should receive full indirect lighting and lower values indicate no indirect lighting.
     /// The occlusion values are sampled from the red channel.
-    pub occlusion_texture: Option<Arc<Texture2D>>,
+    pub occlusion_texture: Option<Texture2DRef>,
     /// A scalar multiplier applied to each normal vector of the [Self::normal_texture].
     pub normal_scale: f32,
     /// A tangent space normal map, also known as bump map.
-    pub normal_texture: Option<Arc<Texture2D>>,
+    pub normal_texture: Option<Texture2DRef>,
     /// Render states.
     pub render_states: RenderStates,
     /// Whether this material should be treated as a transparent material (An object needs to be rendered differently depending on whether it is transparent or opaque).
     pub is_transparent: bool,
     /// Color of light shining from an object.
-    pub emissive: Color,
+    pub emissive: Srgba,
     /// Texture with color of light shining from an object.
-    pub emissive_texture: Option<Arc<Texture2D>>,
+    /// The colors are assumed to be in linear sRGB (`RgbU8`), linear sRGB with an alpha channel (`RgbaU8`) or HDR color space.
+    pub emissive_texture: Option<Texture2DRef>,
     /// The lighting model used when rendering this material
     pub lighting_model: LightingModel,
 }
@@ -69,40 +70,51 @@ impl PhysicalMaterial {
     }
 
     fn new_internal(context: &Context, cpu_material: &CpuMaterial, is_transparent: bool) -> Self {
-        let albedo_texture = if let Some(ref cpu_texture) = cpu_material.albedo_texture {
-            Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-        } else {
-            None
-        };
+        let albedo_texture =
+            cpu_material
+                .albedo_texture
+                .as_ref()
+                .map(|cpu_texture| match &cpu_texture.data {
+                    TextureData::RgbU8(_) | TextureData::RgbaU8(_) => {
+                        let mut cpu_texture = cpu_texture.clone();
+                        cpu_texture.data.to_linear_srgb();
+                        Texture2DRef::from_cpu_texture(context, &cpu_texture)
+                    }
+                    _ => Texture2DRef::from_cpu_texture(context, cpu_texture),
+                });
         let metallic_roughness_texture =
             if let Some(ref cpu_texture) = cpu_material.occlusion_metallic_roughness_texture {
-                Some(Arc::new(Texture2D::new(&context, cpu_texture)))
+                Some(Texture2DRef::from_cpu_texture(context, cpu_texture))
             } else {
-                if let Some(ref cpu_texture) = cpu_material.metallic_roughness_texture {
-                    Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-                } else {
-                    None
-                }
+                cpu_material
+                    .metallic_roughness_texture
+                    .as_ref()
+                    .map(|cpu_texture| Texture2DRef::from_cpu_texture(context, cpu_texture))
             };
         let occlusion_texture = if cpu_material.occlusion_metallic_roughness_texture.is_some() {
             metallic_roughness_texture.clone()
         } else {
-            if let Some(ref cpu_texture) = cpu_material.occlusion_texture {
-                Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-            } else {
-                None
-            }
+            cpu_material
+                .occlusion_texture
+                .as_ref()
+                .map(|cpu_texture| Texture2DRef::from_cpu_texture(context, cpu_texture))
         };
-        let normal_texture = if let Some(ref cpu_texture) = cpu_material.normal_texture {
-            Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-        } else {
-            None
-        };
-        let emissive_texture = if let Some(ref cpu_texture) = cpu_material.emissive_texture {
-            Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-        } else {
-            None
-        };
+        let normal_texture = cpu_material
+            .normal_texture
+            .as_ref()
+            .map(|cpu_texture| Texture2DRef::from_cpu_texture(context, cpu_texture));
+        let emissive_texture =
+            cpu_material
+                .emissive_texture
+                .as_ref()
+                .map(|cpu_texture| match &cpu_texture.data {
+                    TextureData::RgbU8(_) | TextureData::RgbaU8(_) => {
+                        let mut cpu_texture = cpu_texture.clone();
+                        cpu_texture.data.to_linear_srgb();
+                        Texture2DRef::from_cpu_texture(context, &cpu_texture)
+                    }
+                    _ => Texture2DRef::from_cpu_texture(context, cpu_texture),
+                });
         Self {
             name: cpu_material.name.clone(),
             albedo: cpu_material.albedo,
@@ -138,7 +150,27 @@ impl FromCpuMaterial for PhysicalMaterial {
 }
 
 impl Material for PhysicalMaterial {
-    fn fragment_shader_source(&self, use_vertex_colors: bool, lights: &[&dyn Light]) -> String {
+    fn id(&self) -> u16 {
+        let mut id = 0b1u16 << 15 | 0b1u16 << 5;
+        if self.albedo_texture.is_some() {
+            id |= 0b1u16;
+        }
+        if self.metallic_roughness_texture.is_some() {
+            id |= 0b1u16 << 1;
+        }
+        if self.occlusion_texture.is_some() {
+            id |= 0b1u16 << 2;
+        }
+        if self.normal_texture.is_some() {
+            id |= 0b1u16 << 3;
+        }
+        if self.emissive_texture.is_some() {
+            id |= 0b1u16 << 4;
+        }
+        id
+    }
+
+    fn fragment_shader_source(&self, lights: &[&dyn Light]) -> String {
         let mut output = lights_shader_source(lights, self.lighting_model);
         if self.albedo_texture.is_some()
             || self.metallic_roughness_texture.is_some()
@@ -163,14 +195,30 @@ impl Material for PhysicalMaterial {
                 output.push_str("#define USE_EMISSIVE_TEXTURE;\n");
             }
         }
-        if use_vertex_colors {
-            output.push_str("#define USE_VERTEX_COLORS\nin vec4 col;\n");
-        }
+        output.push_str(ToneMapping::fragment_shader_source());
+        output.push_str(ColorMapping::fragment_shader_source());
         output.push_str(include_str!("shaders/physical_material.frag"));
         output
     }
+
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            position: true,
+            normal: true,
+            color: true,
+            uv: self.albedo_texture.is_some()
+                || self.metallic_roughness_texture.is_some()
+                || self.normal_texture.is_some()
+                || self.occlusion_texture.is_some()
+                || self.emissive_texture.is_some(),
+            tangents: self.normal_texture.is_some(),
+        }
+    }
+
     fn use_uniforms(&self, program: &Program, camera: &Camera, lights: &[&dyn Light]) {
-        if lights.len() > 0 {
+        camera.tone_mapping.use_uniforms(program);
+        camera.color_mapping.use_uniforms(program);
+        if !lights.is_empty() {
             program.use_uniform_if_required("cameraPosition", camera.position());
             for (i, light) in lights.iter().enumerate() {
                 light.use_uniforms(program, i as u32);
@@ -179,31 +227,36 @@ impl Material for PhysicalMaterial {
             program.use_uniform_if_required("roughness", self.roughness);
             if program.requires_uniform("albedoTexture") {
                 if let Some(ref texture) = self.albedo_texture {
+                    program.use_uniform("albedoTexTransform", texture.transformation);
                     program.use_texture("albedoTexture", texture);
                 }
             }
             if program.requires_uniform("metallicRoughnessTexture") {
                 if let Some(ref texture) = self.metallic_roughness_texture {
+                    program.use_uniform("metallicRoughnessTexTransform", texture.transformation);
                     program.use_texture("metallicRoughnessTexture", texture);
                 }
             }
             if program.requires_uniform("occlusionTexture") {
                 if let Some(ref texture) = self.occlusion_texture {
+                    program.use_uniform("occlusionTexTransform", texture.transformation);
                     program.use_uniform("occlusionStrength", self.occlusion_strength);
                     program.use_texture("occlusionTexture", texture);
                 }
             }
             if program.requires_uniform("normalTexture") {
                 if let Some(ref texture) = self.normal_texture {
+                    program.use_uniform("normalTexTransform", texture.transformation);
                     program.use_uniform("normalScale", self.normal_scale);
                     program.use_texture("normalTexture", texture);
                 }
             }
         }
-        program.use_uniform("albedo", self.albedo);
-        program.use_uniform("emissive", self.emissive);
+        program.use_uniform("albedo", self.albedo.to_linear_srgb());
+        program.use_uniform("emissive", self.emissive.to_linear_srgb());
         if program.requires_uniform("emissiveTexture") {
             if let Some(ref texture) = self.emissive_texture {
+                program.use_uniform("emissiveTexTransform", texture.transformation);
                 program.use_texture("emissiveTexture", texture);
             }
         }
@@ -225,7 +278,7 @@ impl Default for PhysicalMaterial {
     fn default() -> Self {
         Self {
             name: "default".to_string(),
-            albedo: Color::WHITE,
+            albedo: Srgba::WHITE,
             albedo_texture: None,
             metallic: 0.0,
             roughness: 1.0,
@@ -236,7 +289,7 @@ impl Default for PhysicalMaterial {
             occlusion_strength: 1.0,
             render_states: RenderStates::default(),
             is_transparent: false,
-            emissive: Color::BLACK,
+            emissive: Srgba::BLACK,
             emissive_texture: None,
             lighting_model: LightingModel::Blinn,
         }

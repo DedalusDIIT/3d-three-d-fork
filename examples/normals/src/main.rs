@@ -10,7 +10,6 @@ use three_d::*;
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "Normals".to_string(),
-        min_size: (512, 512),
         max_size: Some((1280, 720)),
         ..Default::default()
     })
@@ -39,7 +38,7 @@ pub async fn run() {
     let mut instanced_model_with_computed_tangents = InstancedModel::<PhysicalMaterial>::new(
         &context,
         &Instances {
-            translations: vec![Vec3::zero()],
+            transformations: vec![Mat4::identity()],
             ..Default::default()
         },
         &cpu_model,
@@ -58,7 +57,7 @@ pub async fn run() {
     let mut instanced_model_with_loaded_tangents = InstancedModel::<PhysicalMaterial>::new(
         &context,
         &Instances {
-            translations: vec![Vec3::zero()],
+            transformations: vec![Mat4::identity()],
             ..Default::default()
         },
         &cpu_model,
@@ -79,8 +78,8 @@ pub async fn run() {
     );
     let mut control = OrbitControl::new(*camera.target(), 1.0, 100.0);
 
-    let ambient = AmbientLight::new(&context, 0.4, Color::WHITE);
-    let directional = DirectionalLight::new(&context, 2.0, Color::WHITE, &vec3(0.0, -1.0, 0.0));
+    let ambient = AmbientLight::new(&context, 0.4, Srgba::WHITE);
+    let directional = DirectionalLight::new(&context, 2.0, Srgba::WHITE, &vec3(0.0, -1.0, 0.0));
 
     // main loop
     window.render_loop(move |mut frame_input| {

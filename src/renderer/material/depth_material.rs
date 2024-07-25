@@ -22,17 +22,37 @@ impl FromCpuMaterial for DepthMaterial {
 }
 
 impl Material for DepthMaterial {
-    fn fragment_shader_source(&self, _use_vertex_colors: bool, _lights: &[&dyn Light]) -> String {
+    fn id(&self) -> u16 {
+        0b1u16 << 15 | 0b10u16
+    }
+
+    fn fragment_shader_source(&self, _lights: &[&dyn Light]) -> String {
         include_str!("shaders/depth_material.frag").to_string()
     }
+
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            position: true,
+            ..FragmentAttributes::NONE
+        }
+    }
+
     fn use_uniforms(&self, program: &Program, camera: &Camera, _lights: &[&dyn Light]) {
-        program.use_uniform("minDistance", &self.min_distance.unwrap_or(camera.z_near()));
-        program.use_uniform("maxDistance", &self.max_distance.unwrap_or(camera.z_far()));
+        program.use_uniform(
+            "minDistance",
+            self.min_distance.unwrap_or_else(|| camera.z_near()),
+        );
+        program.use_uniform(
+            "maxDistance",
+            self.max_distance.unwrap_or_else(|| camera.z_far()),
+        );
         program.use_uniform("eye", camera.position());
     }
+
     fn render_states(&self) -> RenderStates {
         self.render_states
     }
+
     fn material_type(&self) -> MaterialType {
         MaterialType::Opaque
     }

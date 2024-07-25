@@ -24,14 +24,6 @@ mod uniform;
 #[doc(inline)]
 pub use uniform::*;
 
-mod image_effect;
-#[doc(inline)]
-pub use image_effect::*;
-
-mod image_cube_effect;
-#[doc(inline)]
-pub use image_cube_effect::*;
-
 mod program;
 #[doc(inline)]
 pub use program::*;
@@ -48,7 +40,7 @@ pub mod prelude {
     pub use three_d_asset::prelude::*;
 }
 pub use prelude::*;
-pub use three_d_asset::{Camera, Viewport};
+pub use three_d_asset::Viewport;
 
 /// A result for this crate.
 use thiserror::Error;
@@ -69,93 +61,40 @@ pub enum CoreError {
     ShaderLink(String),
 }
 
-///
-/// Applies a 2D/screen space effect to the given viewport. Can for example be used for adding an effect on top of a rendered image.
-/// The fragment shader get the uv coordinates of the viewport (specified by `in vec2 uvs;`),
-/// where uv coordinates of `(0, 0)` corresponds to the bottom left corner of the viewport and `(1, 1)` to the top right corner.
-///
-pub fn apply_effect(
+pub(crate) fn full_screen_draw(
     context: &Context,
-    fragment_shader_source: &str,
+    program: &Program,
     render_states: RenderStates,
     viewport: Viewport,
-    use_uniforms: impl FnOnce(&Program),
 ) {
-    let position_buffer = full_screen_buffer(context);
-    context
-        .program(
-            "
-            in vec3 position;
-            out vec2 uvs;
-            void main()
-            {
-                uvs = 0.5 * position.xy + 0.5;
-                gl_Position = vec4(position, 1.0);
-            }
-        ",
-            fragment_shader_source,
-            |program| {
-                use_uniforms(program);
-                program.use_vertex_attribute("position", &position_buffer);
-                program.draw_arrays(render_states, viewport, 3);
-            },
-        )
-        .expect("Failed compiling shader");
+    unsafe { context.bind_vertex_array(Some(context.vao)) };
+    program.draw_arrays(render_states, viewport, 3);
 }
 
-///
-/// Applies a 2D/screen space effect to the given viewport of the given side of a cube map.
-/// The fragment shader get the 3D position (specified by `in vec3 pos;`) of the fragment on the cube with minimum position `(-1, -1, -1)` and maximum position `(1, 1, 1)`.
-///
-pub fn apply_cube_effect(
-    context: &Context,
-    side: CubeMapSide,
-    fragment_shader_source: &str,
-    render_states: RenderStates,
-    viewport: Viewport,
-    use_uniforms: impl FnOnce(&Program),
-) {
-    let position_buffer = full_screen_buffer(context);
-    context
-        .program(
-            "
-            uniform vec3 direction;
-            uniform vec3 up;
-            in vec3 position;
-            out vec3 pos;
-            void main()
-            {
-                vec3 right = cross(direction, up);
-                pos = up * position.y + right * position.x + direction;
-                gl_Position = vec4(position, 1.0);
-            }
-        ",
-            fragment_shader_source,
-            |program| {
-                use_uniforms(program);
-                program.use_uniform("direction", side.direction());
-                program.use_uniform("up", side.up());
-                program.use_vertex_attribute("position", &position_buffer);
-                program.draw_arrays(render_states, viewport, 3);
-            },
-        )
-        .expect("Failed compiling shader");
-}
+pub(crate) fn full_screen_vertex_shader_source() -> &'static str {
+    "
+        out vec2 uvs;
+        out vec4 col;
+        void main()
+        {
+            vec3 vertices[3] = vec3[3](
+                vec3(-3.0, -1.0, 0.0),
+                vec3(3.0, -1.0, 0.0),
+                vec3(0.0, 2.0, 0.0)
+            );
 
-fn full_screen_buffer(context: &Context) -> VertexBuffer {
-    VertexBuffer::new_with_data(
-        context,
-        &vec![
-            vec3(-3.0, -1.0, 0.0),
-            vec3(3.0, -1.0, 0.0),
-            vec3(0.0, 2.0, 0.0),
-        ],
-    )
+            vec3 position = vertices[gl_VertexID];
+
+            uvs = 0.5 * position.xy + 0.5;
+            col = vec4(1.0);
+            gl_Position = vec4(position, 1.0);
+        }
+    "
 }
 
 mod data_type;
 use data_type::DataType;
-fn to_byte_slice<'a, T: DataType>(data: &'a [T]) -> &'a [u8] {
+fn to_byte_slice<T: DataType>(data: &[T]) -> &[u8] {
     unsafe {
         std::slice::from_raw_parts(
             data.as_ptr() as *const _,
@@ -164,7 +103,7 @@ fn to_byte_slice<'a, T: DataType>(data: &'a [T]) -> &'a [u8] {
     }
 }
 
-fn from_byte_slice<'a, T: DataType>(data: &'a [u8]) -> &'a [T] {
+fn from_byte_slice<T: DataType>(data: &[u8]) -> &[T] {
     unsafe {
         let (_prefix, values, _suffix) = data.align_to::<T>();
         values

@@ -3,9 +3,17 @@ use three_d::*;
 struct MandelbrotMaterial {}
 
 impl Material for MandelbrotMaterial {
-    fn fragment_shader_source(&self, _use_vertex_colors: bool, _lights: &[&dyn Light]) -> String {
+    fn fragment_shader_source(&self, _lights: &[&dyn Light]) -> String {
         include_str!("mandelbrot.frag").to_string()
     }
+
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            position: true,
+            ..FragmentAttributes::NONE
+        }
+    }
+
     fn use_uniforms(&self, _program: &Program, _camera: &Camera, _lights: &[&dyn Light]) {}
     fn render_states(&self) -> RenderStates {
         RenderStates {
@@ -17,6 +25,10 @@ impl Material for MandelbrotMaterial {
     }
     fn material_type(&self) -> MaterialType {
         MaterialType::Opaque
+    }
+
+    fn id(&self) -> u16 {
+        0b11u16
     }
 }
 
@@ -65,13 +77,13 @@ pub fn main() {
         redraw |= camera.set_viewport(frame_input.viewport);
 
         for event in frame_input.events.iter() {
-            match event {
+            match *event {
                 Event::MouseMotion { delta, button, .. } => {
-                    if *button == Some(MouseButton::Left) {
+                    if button == Some(MouseButton::Left) {
                         let speed = 0.003 * camera.position().z.abs();
                         let right = camera.right_direction();
                         let up = right.cross(camera.view_direction());
-                        let delta = -right * speed * delta.0 as f32 + up * speed * delta.1 as f32;
+                        let delta = -right * speed * delta.0 + up * speed * delta.1;
                         camera.translate(&delta);
                         redraw = true;
                     }
@@ -80,15 +92,9 @@ pub fn main() {
                     delta, position, ..
                 } => {
                     let distance = camera.position().z.abs();
-                    let pixel = (
-                        (frame_input.device_pixel_ratio * position.0) as f32,
-                        (frame_input.viewport.height as f64
-                            - frame_input.device_pixel_ratio * position.1)
-                            as f32,
-                    );
-                    let mut target = camera.position_at_pixel(pixel);
+                    let mut target = camera.position_at_pixel(position);
                     target.z = 0.0;
-                    camera.zoom_towards(&target, distance * 0.05 * delta.1 as f32, 0.00001, 10.0);
+                    camera.zoom_towards(&target, distance * 0.05 * delta.1, 0.00001, 10.0);
                     redraw = true;
                 }
                 _ => {}

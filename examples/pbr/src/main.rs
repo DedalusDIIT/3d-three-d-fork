@@ -10,7 +10,6 @@ use three_d::*;
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "PBR!".to_string(),
-        min_size: (512, 512),
         max_size: Some((1280, 720)),
         ..Default::default()
     })
@@ -57,7 +56,7 @@ pub async fn run() {
         .unwrap()
         .remove(0);
 
-    let light = AmbientLight::new_with_environment(&context, 1.0, Color::WHITE, skybox.texture());
+    let light = AmbientLight::new_with_environment(&context, 1.0, Srgba::WHITE, skybox.texture());
 
     // main loop
     let mut normal_map_enabled = true;
@@ -82,7 +81,7 @@ pub async fn run() {
                     ui.checkbox(&mut occlusion_map_enabled, "Occlusion map");
                     ui.checkbox(&mut emissive_map_enabled, "Emissive map");
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = gui_context.used_rect().width();
             },
         );
 
@@ -131,7 +130,7 @@ pub async fn run() {
                     emissive: if emissive_map_enabled {
                         model.material.emissive
                     } else {
-                        Color::BLACK
+                        Srgba::BLACK
                     },
                     emissive_texture: if emissive_map_enabled {
                         model.material.emissive_texture.clone()
@@ -146,8 +145,9 @@ pub async fn run() {
                     ),
                 };
                 model.render_with_material(&material, &camera, &[&light]);
-                gui.render();
-            });
+                gui.render()
+            })
+            .unwrap();
 
         FrameOutput::default()
     });

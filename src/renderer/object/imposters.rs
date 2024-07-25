@@ -11,6 +11,7 @@ const NO_VIEW_ANGLES: u32 = 8;
 /// rendered continuously instead of the expensive objects.
 ///
 pub struct Imposters {
+    context: Context,
     sprites: Sprites,
     material: ImpostersMaterial,
 }
@@ -20,7 +21,7 @@ impl Imposters {
     /// Constructs a new [Imposters] and render the imposter texture from the given objects with the given lights.
     /// The imposters are placed at the given positions.
     ///
-    pub fn new<'a>(
+    pub fn new(
         context: &Context,
         positions: &[Vec3],
         objects: impl IntoIterator<Item = impl Object> + Clone,
@@ -35,6 +36,7 @@ impl Imposters {
         let mut sprites = Sprites::new(context, positions, Some(vec3(0.0, 1.0, 0.0)));
         sprites.set_transformation(get_sprite_transform(aabb));
         Imposters {
+            context: context.clone(),
             sprites,
             material: ImpostersMaterial::new(context, aabb, objects, lights, max_texture_size),
         }
@@ -51,7 +53,7 @@ impl Imposters {
     /// Render the imposter texture from the given objects with the given lights.
     /// Use this if you want to update the look of the imposters.
     ///
-    pub fn update_texture<'a>(
+    pub fn update_texture(
         &mut self,
         objects: impl IntoIterator<Item = impl Object> + Clone,
         lights: &[&dyn Light],
@@ -89,41 +91,27 @@ impl<'a> IntoIterator for &'a Imposters {
     }
 }
 
+use std::ops::Deref;
+impl Deref for Imposters {
+    type Target = Sprites;
+    fn deref(&self) -> &Self::Target {
+        &self.sprites
+    }
+}
+
+impl std::ops::DerefMut for Imposters {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.sprites
+    }
+}
+
 impl Geometry for Imposters {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        self.sprites.render_with_material(material, camera, lights)
-    }
-
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        self.sprites.render_with_post_material(
-            material,
-            camera,
-            lights,
-            color_texture,
-            depth_texture,
-        )
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.sprites.aabb()
-    }
+    impl_geometry_body!(deref);
 }
 
 impl Object for Imposters {
     fn render(&self, camera: &Camera, lights: &[&dyn Light]) {
-        self.render_with_material(&self.material, camera, lights)
+        render_with_material(&self.context, camera, &self, &self.material, lights)
     }
 
     fn material_type(&self) -> MaterialType {
@@ -137,7 +125,7 @@ struct ImpostersMaterial {
 }
 
 impl ImpostersMaterial {
-    pub fn new<'a>(
+    pub fn new(
         context: &Context,
         aabb: AxisAlignedBoundingBox,
         objects: impl IntoIterator<Item = impl Object> + Clone,
@@ -161,7 +149,7 @@ impl ImpostersMaterial {
         m.update(aabb, objects, lights, max_texture_size);
         m
     }
-    pub fn update<'a>(
+    pub fn update(
         &mut self,
         aabb: AxisAlignedBoundingBox,
         objects: impl IntoIterator<Item = impl Object> + Clone,
@@ -185,6 +173,7 @@ impl ImpostersMaterial {
                 0.0,
                 4.0 * (width + height),
             );
+            camera.disable_tone_and_color_mapping();
             self.texture = Texture2DArray::new_empty::<[f16; 4]>(
                 &self.context,
                 texture_width,
@@ -223,16 +212,31 @@ impl ImpostersMaterial {
 }
 
 impl Material for ImpostersMaterial {
-    fn fragment_shader_source(&self, _use_vertex_colors: bool, _lights: &[&dyn Light]) -> String {
+    fn id(&self) -> u16 {
+        0b1u16 << 15 | 0b1101u16
+    }
+
+    fn fragment_shader_source(&self, _lights: &[&dyn Light]) -> String {
         format!(
-            "{}{}",
+            "{}{}{}{}",
+            ToneMapping::fragment_shader_source(),
+            ColorMapping::fragment_shader_source(),
             include_str!("../../core/shared.frag"),
             include_str!("shaders/imposter.frag")
         )
     }
 
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            uv: true,
+            ..FragmentAttributes::NONE
+        }
+    }
+
     fn use_uniforms(&self, program: &Program, camera: &Camera, _lights: &[&dyn Light]) {
-        program.use_uniform("no_views", &(NO_VIEW_ANGLES as i32));
+        camera.tone_mapping.use_uniforms(program);
+        camera.color_mapping.use_uniforms(program);
+        program.use_uniform("no_views", NO_VIEW_ANGLES as i32);
         program.use_uniform("view", camera.view());
         program.use_texture_array("tex", &self.texture);
     }

@@ -223,6 +223,9 @@ pub trait DataType: std::fmt::Debug + Clone {
     fn internal_format() -> u32;
     fn data_type() -> u32;
     fn size() -> u32;
+    fn normalized() -> bool {
+        false
+    }
     fn send_uniform(context: &Context, location: &UniformLocation, data: &[Self]);
 }
 
@@ -235,6 +238,9 @@ impl<T: DataType + ?Sized> DataType for &T {
     }
     fn size() -> u32 {
         T::size()
+    }
+    fn normalized() -> bool {
+        T::normalized()
     }
 
     fn send_uniform(context: &Context, location: &UniformLocation, data: &[Self]) {
@@ -421,7 +427,7 @@ impl<T: PrimitiveDataType> DataType for [T; 2] {
     }
 
     fn send_uniform(context: &Context, location: &UniformLocation, data: &[Self]) {
-        let data = data.iter().flatten().map(|v| *v).collect::<Vec<_>>();
+        let data = data.iter().flatten().copied().collect::<Vec<_>>();
         T::send_uniform_with_type(context, location, &data, UniformType::Vec2)
     }
 }
@@ -460,7 +466,7 @@ impl<T: PrimitiveDataType> DataType for [T; 3] {
     }
 
     fn send_uniform(context: &Context, location: &UniformLocation, data: &[Self]) {
-        let data = data.iter().flatten().map(|v| *v).collect::<Vec<_>>();
+        let data = data.iter().flatten().copied().collect::<Vec<_>>();
         T::send_uniform_with_type(context, location, &data, UniformType::Vec3)
     }
 }
@@ -501,7 +507,7 @@ impl<T: PrimitiveDataType> DataType for [T; 4] {
     }
 
     fn send_uniform(context: &Context, location: &UniformLocation, data: &[Self]) {
-        let data = data.iter().flatten().map(|v| *v).collect::<Vec<_>>();
+        let data = data.iter().flatten().copied().collect::<Vec<_>>();
         T::send_uniform_with_type(context, location, &data, UniformType::Vec4)
     }
 }
@@ -525,35 +531,6 @@ impl<T: PrimitiveDataType> DataType for Quaternion<T> {
             .flat_map(|v| [v.v.x, v.v.y, v.v.z, v.s])
             .collect::<Vec<_>>();
         T::send_uniform_with_type(context, location, &data, UniformType::Vec4)
-    }
-}
-
-impl DataType for Color {
-    fn internal_format() -> u32 {
-        u8::internal_format_with_size(Self::size())
-    }
-
-    fn data_type() -> u32 {
-        u8::data_type()
-    }
-
-    fn size() -> u32 {
-        4
-    }
-
-    fn send_uniform(context: &Context, location: &UniformLocation, data: &[Self]) {
-        let data = data
-            .iter()
-            .flat_map(|v| {
-                [
-                    v.r as f32 / 255.0,
-                    v.g as f32 / 255.0,
-                    v.b as f32 / 255.0,
-                    v.a as f32 / 255.0,
-                ]
-            })
-            .collect::<Vec<_>>();
-        f32::send_uniform_with_type(context, location, &data, UniformType::Vec4)
     }
 }
 

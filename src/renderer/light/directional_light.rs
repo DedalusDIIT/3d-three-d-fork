@@ -13,7 +13,7 @@ pub struct DirectionalLight {
     /// The intensity of the light. This allows for higher intensity than 1 which can be used to simulate high intensity light sources like the sun.
     pub intensity: f32,
     /// The base color of the light.
-    pub color: Color,
+    pub color: Srgba,
     /// The direction the light shines.
     pub direction: Vec3,
 }
@@ -23,7 +23,7 @@ impl DirectionalLight {
     pub fn new(
         context: &Context,
         intensity: f32,
-        color: Color,
+        color: Srgba,
         direction: &Vec3,
     ) -> DirectionalLight {
         DirectionalLight {
@@ -97,14 +97,22 @@ impl DirectionalLight {
         shadow_texture
             .as_depth_target()
             .clear(ClearState::default())
-            .write(|| {
+            .write::<RendererError>(|| {
                 for geometry in geometries
                     .into_iter()
                     .filter(|g| shadow_camera.in_frustum(&g.aabb()))
                 {
-                    geometry.render_with_material(&depth_material, &shadow_camera, &[]);
+                    render_with_material(
+                        &self.context,
+                        &shadow_camera,
+                        &geometry,
+                        &depth_material,
+                        &[],
+                    );
                 }
-            });
+                Ok(())
+            })
+            .unwrap();
         self.shadow_texture = Some(shadow_texture);
         self.shadow_matrix = shadow_matrix(&shadow_camera);
     }
@@ -124,40 +132,48 @@ impl Light for DirectionalLight {
                 "
                     uniform sampler2D shadowMap{};
                     uniform mat4 shadowMVP{};
-        
+
                     uniform vec3 color{};
                     uniform vec3 direction{};
-        
+
                     vec3 calculate_lighting{}(vec3 surface_color, vec3 position, vec3 normal, vec3 view_direction, float metallic, float roughness, float occlusion)
                     {{
-                        return calculate_light(color{}, -direction{}, surface_color, view_direction, normal, metallic, roughness) 
-                            * calculate_shadow(shadowMap{}, shadowMVP{}, position);
+                        return calculate_light(color{}, -direction{}, surface_color, view_direction, normal, metallic, roughness)
+                            * calculate_shadow(-direction{}, normal, shadowMap{}, shadowMVP{}, position);
                     }}
-                
-                ", i, i, i, i, i, i, i, i, i)
+
+                ", i, i, i, i, i, i, i, i, i, i)
         } else {
             format!(
                 "
                     uniform vec3 color{};
                     uniform vec3 direction{};
-        
+
                     vec3 calculate_lighting{}(vec3 surface_color, vec3 position, vec3 normal, vec3 view_direction, float metallic, float roughness, float occlusion)
                     {{
                         return calculate_light(color{}, -direction{}, surface_color, view_direction, normal, metallic, roughness);
                     }}
-                
+
                 ", i, i, i, i, i)
         }
     }
     fn use_uniforms(&self, program: &Program, i: u32) {
         if let Some(ref tex) = self.shadow_texture {
             program.use_depth_texture(&format!("shadowMap{}", i), tex);
-            program.use_uniform(&format!("shadowMVP{}", i), &self.shadow_matrix);
+            program.use_uniform(&format!("shadowMVP{}", i), self.shadow_matrix);
         }
         program.use_uniform(
             &format!("color{}", i),
-            &(self.color.to_vec3() * self.intensity),
+            self.color.to_linear_srgb().truncate() * self.intensity,
         );
-        program.use_uniform(&format!("direction{}", i), &self.direction.normalize());
+        program.use_uniform(&format!("direction{}", i), self.direction.normalize());
+    }
+
+    fn id(&self) -> u8 {
+        if self.shadow_texture.is_some() {
+            0b1u8 << 7 | 0b10u8
+        } else {
+            0b1u8 << 7 | 0b11u8
+        }
     }
 }

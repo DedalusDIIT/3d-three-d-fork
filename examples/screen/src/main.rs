@@ -26,9 +26,9 @@ pub fn main() {
             vec3(0.0, 0.5, 0.0),   // top
         ]),
         colors: Some(vec![
-            Color::new(255, 0, 0, 255), // bottom right
-            Color::new(0, 255, 0, 255), // bottom left
-            Color::new(0, 0, 255, 255), // top
+            Srgba::new(255, 0, 0, 255), // bottom right
+            Srgba::new(0, 255, 0, 255), // bottom left
+            Srgba::new(0, 0, 255, 255), // top
         ]),
         ..Default::default()
     };
@@ -38,7 +38,7 @@ pub fn main() {
     let mut gui = three_d::GUI::new(&context);
     let mut viewport_zoom = 1.0;
     let mut scissor_zoom = 1.0;
-    window.render_loop(move |mut frame_input: FrameInput| {
+    window.render_loop(move |mut frame_input| {
         model.set_transformation(Mat4::from_angle_y(radians(
             (frame_input.accumulated_time * 0.005) as f32,
         )));
@@ -57,7 +57,7 @@ pub fn main() {
                     ui.add(Slider::new(&mut viewport_zoom, 0.01..=1.0).text("Viewport"));
                     ui.add(Slider::new(&mut scissor_zoom, 0.01..=1.0).text("Scissor"));
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = gui_context.used_rect().width();
             },
         );
 
@@ -94,7 +94,8 @@ pub fn main() {
                 ClearState::color(0.5, 0.5, 0.5, 1.0),
             )
             .render_partially(scissor_box_zoomed, &camera, &model, &[])
-            .write(|| gui.render());
+            .write(|| gui.render())
+            .unwrap();
 
         // Secondary view
         let secondary_viewport = Viewport {
@@ -108,7 +109,7 @@ pub fn main() {
             .screen()
             .clear_partially(
                 secondary_viewport.into(),
-                ClearState::color(0.3, 0.3, 0.3, 1.0),
+                ClearState::color_and_depth(0.3, 0.3, 0.3, 1.0, 1.0),
             )
             .render_partially(secondary_viewport.into(), &camera, &model, &[]);
 

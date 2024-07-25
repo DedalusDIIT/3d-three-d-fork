@@ -67,7 +67,7 @@ impl<M: Material + Clone> Terrain<M> {
             index_buffer4: Self::indices(context, 4),
             index_buffer16: Self::indices(context, 16),
             lod: Arc::new(|_| Lod::High),
-            material: material.clone(),
+            material,
             height_map,
             side_length,
             vertex_distance,
@@ -297,7 +297,7 @@ impl TerrainPatch {
     fn normals(
         height_map: impl Fn(f32, f32) -> f32,
         offset: Vec2,
-        positions: &Vec<Vec3>,
+        positions: &[Vec3],
         vertex_distance: f32,
     ) -> Vec<Vec3> {
         let mut data = vec![vec3(0.0, 0.0, 0.0); VERTICES_PER_SIDE * VERTICES_PER_SIDE];
@@ -334,65 +334,69 @@ impl TerrainPatch {
         }
         data
     }
-
-    fn draw(&self, program: &Program, render_states: RenderStates, camera: &Camera) {
-        let transformation = Mat4::identity();
-        program.use_uniform("modelMatrix", &transformation);
-        program.use_uniform(
-            "viewProjectionMatrix",
-            &(camera.projection() * camera.view()),
-        );
-        program.use_uniform(
-            "normalMatrix",
-            &transformation.invert().unwrap().transpose(),
-        );
-
-        program.use_vertex_attribute("position", &self.positions_buffer);
-        program.use_vertex_attribute("normal", &self.normals_buffer);
-        program.draw_elements(render_states, camera.viewport(), &self.index_buffer);
-    }
 }
 
 impl Geometry for TerrainPatch {
+    fn vertex_shader_source(&self, required_attributes: FragmentAttributes) -> String {
+        if required_attributes.normal || required_attributes.tangents {
+            format!(
+                "#define USE_NORMALS\n{}",
+                include_str!("shaders/terrain.vert")
+            )
+        } else {
+            include_str!("shaders/terrain.vert").to_owned()
+        }
+    }
+
+    fn draw(
+        &self,
+        camera: &Camera,
+        program: &Program,
+        render_states: RenderStates,
+        attributes: FragmentAttributes,
+    ) {
+        program.use_uniform("viewProjectionMatrix", camera.projection() * camera.view());
+        program.use_vertex_attribute("position", &self.positions_buffer);
+        if attributes.normal || attributes.tangents {
+            program.use_vertex_attribute("normal", &self.normals_buffer);
+        }
+        program.draw_elements(render_states, camera.viewport(), &self.index_buffer);
+    }
+
+    fn id(&self, required_attributes: FragmentAttributes) -> u16 {
+        if required_attributes.normal || required_attributes.tangents {
+            0b1u16 << 15 | 0b10u16
+        } else {
+            0b1u16 << 15 | 0b11u16
+        }
+    }
+
     fn render_with_material(
         &self,
         material: &dyn Material,
         camera: &Camera,
         lights: &[&dyn Light],
     ) {
-        let fragment_shader_source = material.fragment_shader_source(false, lights);
-        self.context
-            .program(
-                &include_str!("shaders/terrain.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader");
+        render_with_material(&self.context, camera, &self, material, lights);
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
+        material: &dyn Effect,
         camera: &Camera,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        let fragment_shader_source =
-            material.fragment_shader_source(lights, color_texture, depth_texture);
-        self.context
-            .program(
-                &include_str!("shaders/terrain.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights, color_texture, depth_texture);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader");
+        render_with_effect(
+            &self.context,
+            camera,
+            self,
+            material,
+            lights,
+            color_texture,
+            depth_texture,
+        )
     }
 
     fn aabb(&self) -> AxisAlignedBoundingBox {

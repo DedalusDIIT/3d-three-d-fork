@@ -6,62 +6,99 @@ use crate::renderer::*;
 #[derive(Clone, Debug)]
 pub struct FogEffect {
     /// The color of the fog.
-    pub color: Color,
+    pub color: Srgba,
     /// The density of the fog.
     pub density: f32,
     /// Determines the variation on the density as a function of time.
     pub animation: f32,
+    /// The time used for the animation.
+    pub time: f32,
 }
 
 impl Default for FogEffect {
     fn default() -> Self {
         Self {
-            color: Color::WHITE,
+            color: Srgba::WHITE,
             density: 0.2,
-            animation: 0.0,
+            animation: 1.0,
+            time: 0.0,
         }
     }
 }
 
-impl FogEffect {
-    ///
-    /// Apply the fog effect on the current render target based on the given depth texture.
-    /// Must be called in the callback given as input to a [RenderTarget], [ColorTarget] or [DepthTarget] write method.
-    ///
-    pub fn apply(
+impl Effect for FogEffect {
+    fn fragment_shader_source(
         &self,
-        context: &Context,
-        time: f64,
-        camera: &Camera,
-        depth_texture: DepthTexture,
-    ) {
-        apply_effect(
-            context,
-            &format!(
-                "{}\n{}\n{}",
-                include_str!("../../core/shared.frag"),
-                depth_texture.fragment_shader_source(),
-                include_str!("shaders/fog_effect.frag")
-            ),
-            RenderStates {
-                write_mask: WriteMask::COLOR,
-                blend: Blend::TRANSPARENCY,
-                cull: Cull::Back,
-                ..Default::default()
-            },
-            camera.viewport(),
-            |program| {
-                depth_texture.use_uniforms(program);
-                program.use_uniform(
-                    "viewProjectionInverse",
-                    (camera.projection() * camera.view()).invert().unwrap(),
-                );
-                program.use_uniform("fogColor", self.color);
-                program.use_uniform("fogDensity", self.density);
-                program.use_uniform("animation", self.animation);
-                program.use_uniform("time", 0.001 * time as f32);
-                program.use_uniform("eyePosition", camera.position());
-            },
+        _lights: &[&dyn Light],
+        color_texture: Option<ColorTexture>,
+        depth_texture: Option<DepthTexture>,
+    ) -> String {
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            include_str!("../../core/shared.frag"),
+            color_texture
+                .expect("Must supply a depth texture to apply a fog effect")
+                .fragment_shader_source(),
+            depth_texture
+                .expect("Must supply a depth texture to apply a fog effect")
+                .fragment_shader_source(),
+            ToneMapping::fragment_shader_source(),
+            ColorMapping::fragment_shader_source(),
+            include_str!("shaders/fog_effect.frag")
         )
+    }
+
+    fn id(&self, color_texture: Option<ColorTexture>, depth_texture: Option<DepthTexture>) -> u16 {
+        0b1u16 << 14
+            | 0b1u16 << 13
+            | 0b1u16 << 12
+            | color_texture
+                .expect("Must supply a color texture to apply a fog effect")
+                .id()
+            | depth_texture
+                .expect("Must supply a depth texture to apply a fog effect")
+                .id()
+    }
+
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            uv: true,
+            ..FragmentAttributes::NONE
+        }
+    }
+
+    fn use_uniforms(
+        &self,
+        program: &Program,
+        camera: &Camera,
+        _lights: &[&dyn Light],
+        color_texture: Option<ColorTexture>,
+        depth_texture: Option<DepthTexture>,
+    ) {
+        camera.tone_mapping.use_uniforms(program);
+        camera.color_mapping.use_uniforms(program);
+        color_texture
+            .expect("Must supply a color texture to apply a fog effect")
+            .use_uniforms(program);
+        depth_texture
+            .expect("Must supply a depth texture to apply a fog effect")
+            .use_uniforms(program);
+        program.use_uniform(
+            "viewProjectionInverse",
+            (camera.projection() * camera.view()).invert().unwrap(),
+        );
+        program.use_uniform("fogColor", Vec4::from(self.color));
+        program.use_uniform("fogDensity", self.density);
+        program.use_uniform("animation", self.animation);
+        program.use_uniform("time", 0.001 * self.time);
+        program.use_uniform("eyePosition", camera.position());
+    }
+
+    fn render_states(&self) -> RenderStates {
+        RenderStates {
+            depth_test: DepthTest::Always,
+            cull: Cull::Back,
+            ..Default::default()
+        }
     }
 }

@@ -3,12 +3,6 @@ use crate::core::texture::*;
 ///
 /// An array of 2D depth textures that can be rendered into and read from. See also [RenderTarget] and [DepthTarget].
 ///
-#[deprecated = "Renamed to DepthTexture2DArray"]
-pub type DepthTargetTexture2DArray = DepthTexture2DArray;
-
-///
-/// An array of 2D depth textures that can be rendered into and read from. See also [RenderTarget] and [DepthTarget].
-///
 pub struct DepthTexture2DArray {
     context: Context,
     id: crate::context::Texture,
@@ -65,7 +59,7 @@ impl DepthTexture2DArray {
     /// Returns a [DepthTarget] which can be used to clear, write to and read from the given layer of this texture.
     /// Combine this together with a [ColorTarget] with [RenderTarget::new] to be able to write to both a depth and color target at the same time.
     ///
-    pub fn as_depth_target<'a>(&'a mut self, layer: u32) -> DepthTarget<'a> {
+    pub fn as_depth_target(&mut self, layer: u32) -> DepthTarget<'_> {
         DepthTarget::new_texture_2d_array(&self.context, self, layer)
     }
 

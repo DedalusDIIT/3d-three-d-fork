@@ -35,7 +35,13 @@ impl CubeMapSideIterator {
     }
 }
 
-impl<'a> Iterator for CubeMapSideIterator {
+impl Default for CubeMapSideIterator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Iterator for CubeMapSideIterator {
     type Item = CubeMapSide;
     fn next(&mut self) -> Option<Self::Item> {
         self.index += 1;
@@ -59,7 +65,7 @@ impl CubeMapSide {
         CubeMapSideIterator::new()
     }
 
-    pub(in crate::core) fn to_const(&self) -> u32 {
+    pub(in crate::core) fn to_const(self) -> u32 {
         match self {
             CubeMapSide::Right => crate::context::TEXTURE_CUBE_MAP_POSITIVE_X,
             CubeMapSide::Left => crate::context::TEXTURE_CUBE_MAP_NEGATIVE_X,
@@ -104,7 +110,6 @@ pub struct TextureCubeMap {
     width: u32,
     height: u32,
     number_of_mip_maps: u32,
-    is_hdr: bool,
     data_byte_size: usize,
 }
 
@@ -112,6 +117,8 @@ impl TextureCubeMap {
     ///
     /// Creates a new cube map texture from the given [CpuTexture]s.
     /// All of the cpu textures must contain data with the same [TextureDataType].
+    ///
+    /// **Note:** Mip maps will not be generated for RGB16F and RGB32F format, even if `mip_map_filter` is specified.
     ///
     pub fn new(
         context: &Context,
@@ -294,6 +301,8 @@ impl TextureCubeMap {
     ///
     /// Creates a new texture cube map.
     ///
+    /// **Note:** Mip maps will not be generated for RGB16F and RGB32F format, even if `mip_map_filter` is specified.
+    ///
     pub fn new_empty<T: TextureDataType>(
         context: &Context,
         width: u32,
@@ -306,14 +315,14 @@ impl TextureCubeMap {
         wrap_r: Wrapping,
     ) -> Self {
         let id = generate(context);
-        let number_of_mip_maps = calculate_number_of_mip_maps(mip_map_filter, width, height, None);
+        let number_of_mip_maps =
+            calculate_number_of_mip_maps::<T>(mip_map_filter, width, height, None);
         let texture = Self {
             context: context.clone(),
             id,
             width,
             height,
             number_of_mip_maps,
-            is_hdr: std::mem::size_of::<T>() as u32 / T::size() > 1,
             data_byte_size: std::mem::size_of::<T>(),
         };
         texture.bind();
@@ -439,7 +448,7 @@ impl TextureCubeMap {
     ) -> Self {
         let texture_size = cpu_texture.width / 4;
         let mut texture = Self::new_empty::<[T; 4]>(
-            &context,
+            context,
             texture_size,
             texture_size,
             Interpolation::Linear,
@@ -454,33 +463,41 @@ impl TextureCubeMap {
             let map = Texture2D::new(context, cpu_texture);
             let fragment_shader_source = "
             uniform sampler2D equirectangularMap;
-            in vec3 pos;
+            uniform vec3 direction;
+            uniform vec3 up;
+
+            in vec2 uvs;
+            
             layout (location = 0) out vec4 outColor;
             
             void main()
             {
-                vec3 v = normalize(pos);
-                vec2 uv = vec2(0.1591 * atan(v.z, v.x) + 0.5, 0.3183 * asin(v.y) + 0.5);
+                vec3 right = cross(direction, up);
+                vec3 dir = normalize(up * (uvs.y - 0.5) * 2.0 + right * (uvs.x - 0.5) * 2.0 + direction);
+                vec2 uv = vec2(0.1591 * atan(dir.z, dir.x) + 0.5, 0.3183 * asin(dir.y) + 0.5);
                 outColor = texture(equirectangularMap, uv);
             }";
+
+            let program = Program::from_source(
+                context,
+                full_screen_vertex_shader_source(),
+                &fragment_shader_source,
+            )
+            .expect("Failed compiling shader");
 
             for side in CubeMapSide::iter() {
                 let viewport = Viewport::new_at_origo(texture_size, texture_size);
                 texture
                     .as_color_target(&[side], None)
                     .clear(ClearState::default())
-                    .write(|| {
-                        apply_cube_effect(
-                            context,
-                            side,
-                            fragment_shader_source,
-                            RenderStates::default(),
-                            viewport,
-                            |program| {
-                                program.use_texture("equirectangularMap", &map);
-                            },
-                        );
-                    });
+                    .write::<CoreError>(|| {
+                        program.use_texture("equirectangularMap", &map);
+                        program.use_uniform("direction", side.direction());
+                        program.use_uniform("up", side.up());
+                        full_screen_draw(context, &program, RenderStates::default(), viewport);
+                        Ok(())
+                    })
+                    .unwrap();
             }
         }
         texture
@@ -510,11 +527,6 @@ impl TextureCubeMap {
     /// The height of this texture.
     pub fn height(&self) -> u32 {
         self.height
-    }
-
-    /// Whether this cube map contain HDR (high dynamic range) data.
-    pub fn is_hdr(&self) -> bool {
-        self.is_hdr
     }
 
     pub(in crate::core) fn generate_mip_maps(&self) {

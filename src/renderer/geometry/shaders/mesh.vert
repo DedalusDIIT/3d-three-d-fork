@@ -20,9 +20,7 @@ in vec4 row2;
 in vec4 row3;
 #endif
 
-#ifdef USE_POSITIONS
 out vec3 pos;
-#endif
 
 #ifdef USE_NORMALS 
 uniform mat4 normalMatrix;
@@ -43,7 +41,6 @@ out vec3 bitang;
 in vec3 tex_transform_row1;
 in vec3 tex_transform_row2;
 #endif
-uniform mat3 textureTransform;
 in vec2 uv_coordinates;
 out vec2 uvs;
 #endif
@@ -54,9 +51,8 @@ in vec4 color;
 #ifdef USE_INSTANCE_COLORS
 in vec4 instance_color;
 #endif
-#ifdef USE_COLORS 
+
 out vec4 col;
-#endif
 
 void main()
 {
@@ -73,7 +69,7 @@ void main()
 #endif
 
     vec4 worldPosition = local2World * vec4(position, 1.);
-    worldPosition.xyz /= worldPosition.w;
+    worldPosition /= worldPosition.w;
 #ifdef PARTICLES
     worldPosition.xyz += start_position + start_velocity * time + 0.5 * acceleration * time * time;
 #endif
@@ -82,9 +78,7 @@ void main()
 #endif
     gl_Position = viewProjection * worldPosition;
 
-#ifdef USE_POSITIONS
     pos = worldPosition.xyz;
-#endif
 
     // *** NORMAL ***
 #ifdef USE_NORMALS 
@@ -104,25 +98,23 @@ void main()
 
     // *** UV ***
 #ifdef USE_UVS 
-    mat3 texTransform = textureTransform;
 #ifdef USE_INSTANCE_TEXTURE_TRANSFORMATION
-    mat3 instancedTexTransform;
-    instancedTexTransform[0] = vec3(tex_transform_row1.x, tex_transform_row2.x, 0.0);
-    instancedTexTransform[1] = vec3(tex_transform_row1.y, tex_transform_row2.y, 0.0);
-    instancedTexTransform[2] = vec3(tex_transform_row1.z, tex_transform_row2.z, 1.0);
-    texTransform *= instancedTexTransform;
-#endif
+    mat3 texTransform;
+    texTransform[0] = vec3(tex_transform_row1.x, tex_transform_row2.x, 0.0);
+    texTransform[1] = vec3(tex_transform_row1.y, tex_transform_row2.y, 0.0);
+    texTransform[2] = vec3(tex_transform_row1.z, tex_transform_row2.z, 1.0);
     uvs = (texTransform * vec3(uv_coordinates, 1.0)).xy;
+#else
+    uvs = uv_coordinates;
+#endif
 #endif
 
     // *** COLOR ***
-#ifdef USE_COLORS
-    col = vec4(1.0, 1.0, 1.0, 1.0);
+    col = vec4(1.0);
 #ifdef USE_VERTEX_COLORS 
-    col *= color / 255.0;
+    col *= color;
 #endif
 #ifdef USE_INSTANCE_COLORS
-    col *= instance_color / 255.0;
-#endif
+    col *= instance_color;
 #endif
 }

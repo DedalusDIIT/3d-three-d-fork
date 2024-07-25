@@ -3,12 +3,6 @@ use crate::core::texture::*;
 ///
 /// A depth texture cube map that can be rendered into and read from. See also [RenderTarget] and [DepthTarget].
 ///
-#[deprecated = "Renamed to DepthTextureCubeMap"]
-pub type DepthTargetTextureCubeMap = DepthTextureCubeMap;
-
-///
-/// A depth texture cube map that can be rendered into and read from. See also [RenderTarget] and [DepthTarget].
-///
 pub struct DepthTextureCubeMap {
     context: Context,
     id: crate::context::Texture,
@@ -62,7 +56,7 @@ impl DepthTextureCubeMap {
     /// Returns a [DepthTarget] which can be used to clear, write to and read from the given side of this texture.
     /// Combine this together with a [ColorTarget] with [RenderTarget::new] to be able to write to both a depth and color target at the same time.
     ///
-    pub fn as_depth_target<'a>(&'a mut self, side: CubeMapSide) -> DepthTarget<'a> {
+    pub fn as_depth_target(&mut self, side: CubeMapSide) -> DepthTarget<'_> {
         DepthTarget::new_texture_cube_map(&self.context, self, side)
     }
 

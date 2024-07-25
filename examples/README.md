@@ -1,133 +1,152 @@
-
 # Examples
 
 ### Build
 
 #### Native:
 
-Build and run an example, in this case 'triangle':
+Build and run an example, in this case the `triangle` example:
 
 ```console
-$ cargo run --example triangle --release
+$ cargo run --release --example triangle
 ```
 
 #### WebAssembly:
 
-Prerequisites: 
-- A server that properly defines the `application/wasm` mime type (for example [http-server](https://www.npmjs.com/package/http-server))
-- [wasm-pack](https://rustwasm.github.io/wasm-pack/)
-
-Build and generate web output (webassembly, javascript and html files) into the pkg folder:
-
-```console
-$ wasm-pack build examples/triangle --target web --out-name web --out-dir ../../pkg
-```
-
-Start the server and go to http://localhost:8080 in a browser:
-
-```console
-$ http-server
-```
+See `web/README.md`.
 
 ### A note on async
 
-All of the examples builds to both native (desktop, mobile or whatever target specified) and WebAssembly (wasm) that can be run in a browser. 
-Because they should run in a browser and to keep the same code for native and wasm, all loading happens async. 
+All of the examples builds to both native (desktop, mobile or whatever target specified) and WebAssembly (wasm) that can be run in a browser.
+Because they should run in a browser and to keep the same code for native and wasm, all loading happens async.
 If your application is native only, you can avoid the async runtime (`tokio` or `async-std`) and use `three_d_asset::load` instead of `three_d_asset::load_async`.
 
-## Triangle [[code](https://github.com/asny/three-d/tree/master/examples/triangle/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/triangle.html)]
+## Triangle [[code](https://github.com/asny/three-d/tree/master/examples/triangle/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/triangle.html)]
 
-This is the recomended starting point for a gentle introduction to `three-d`. 
+This is the recommended starting point for a gentle introduction to `three-d`.
 
-![Triangle example](https://asny.github.io/three-d/0.15/triangle.png)
+![Triangle example](https://asny.github.io/three-d/0.18/triangle.png)
 
-## Mandelbrot [[code](https://github.com/asny/three-d/tree/master/examples/mandelbrot/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/mandelbrot.html)]
+## Triangle core [[code](https://github.com/asny/three-d/tree/master/examples/triangle_core/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/triangle_core.html)]
 
-![Mandelbrot example](https://asny.github.io/three-d/0.15/mandelbrot.png)
+This is the same as the `Triangle` example, except it only uses the core module and not the renderer module.
 
-## Shapes2D [[code](https://github.com/asny/three-d/tree/master/examples/shapes2d/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/shapes2d.html)]
+![Triangle core example](https://asny.github.io/three-d/0.18/triangle_core.png)
 
-![Shapes2d example](https://asny.github.io/three-d/0.15/shapes2d.png)
+## Mandelbrot [[code](https://github.com/asny/three-d/tree/master/examples/mandelbrot/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/mandelbrot.html)]
 
-## Shapes [[code](https://github.com/asny/three-d/tree/master/examples/shapes/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/shapes.html)]
+![Mandelbrot example](https://asny.github.io/three-d/0.18/mandelbrot.png)
 
-![Shapes example](https://asny.github.io/three-d/0.15/shapes.png)
+## Shapes2D [[code](https://github.com/asny/three-d/tree/master/examples/shapes2d/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/shapes2d.html)]
 
-## Screen [[code](https://github.com/asny/three-d/tree/master/examples/screen/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/screen.html)]
+![Shapes2d example](https://asny.github.io/three-d/0.18/shapes2d.png)
 
-![Screen example](https://asny.github.io/three-d/0.15/screen.png)
+## Shapes [[code](https://github.com/asny/three-d/tree/master/examples/shapes/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/shapes.html)]
 
-## Sprites [[code](https://github.com/asny/three-d/tree/master/examples/sprites/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/sprites.html)]
+![Shapes example](https://asny.github.io/three-d/0.18/shapes.png)
 
-![Sprites example](https://asny.github.io/three-d/0.15/sprites.png)
+## Instanced Draw Order [[code](https://github.com/asny/three-d/tree/master/examples/instanced_draw_order/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/instanced_draw_order.html)]
 
-## Texture [[code](https://github.com/asny/three-d/tree/master/examples/texture/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/texture.html)]
+This example shows how depth ordering is currently working for `InstancedMesh` objects with transparency.
 
-![Texture example](https://asny.github.io/three-d/0.15/texture.png)
+![Instanced Draw Order](https://asny.github.io/three-d/0.18/instanced_draw_order.png)
 
-## Picking [[code](https://github.com/asny/three-d/tree/master/examples/picking/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/picking.html)]
+## Instanced Shapes [[code](https://github.com/asny/three-d/tree/master/examples/instanced_shapes/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/instanced_shapes.html)]
 
-![Picking example](https://asny.github.io/three-d/0.15/picking.png)
+![Instanced Shapes example](https://asny.github.io/three-d/0.18/instanced_shapes.png)
 
-## Environment [[code](https://github.com/asny/three-d/tree/master/examples/environment/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/environment.html)]
+## Screen [[code](https://github.com/asny/three-d/tree/master/examples/screen/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/screen.html)]
 
-![Environment example](https://asny.github.io/three-d/0.15/environment.png)
+![Screen example](https://asny.github.io/three-d/0.18/screen.png)
 
-## PBR [[code](https://github.com/asny/three-d/tree/master/examples/pbr/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/pbr.html)]
+## Multisample [[code](https://github.com/asny/three-d/tree/master/examples/multisample/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/multisample.html)]
 
-![PBR example](https://asny.github.io/three-d/0.15/pbr.png)
+![Screen example](https://asny.github.io/three-d/0.18/multisample.png)
 
-## Lighting [[code](https://github.com/asny/three-d/tree/master/examples/lighting/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/lighting.html)]
+## Sprites [[code](https://github.com/asny/three-d/tree/master/examples/sprites/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/sprites.html)]
 
-![Lighting example](https://asny.github.io/three-d/0.15/lighting.png)
+![Sprites example](https://asny.github.io/three-d/0.18/sprites.png)
 
-## Lights [[code](https://github.com/asny/three-d/tree/master/examples/lights/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/lights.html)]
+## Texture [[code](https://github.com/asny/three-d/tree/master/examples/texture/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/texture.html)]
 
-![Lights example](https://asny.github.io/three-d/0.15/lights.png)
+![Texture example](https://asny.github.io/three-d/0.18/texture.png)
 
-## Image [[code](https://github.com/asny/three-d/tree/master/examples/image/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/image.html)]
+## Animation [[code](https://github.com/asny/three-d/tree/master/examples/animation/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/animation.html)]
 
-![Image example](https://asny.github.io/three-d/0.15/image.png)
+![Animation example](https://asny.github.io/three-d/0.18/animation.png)
 
-## Point cloud [[code](https://github.com/asny/three-d/tree/master/examples/point_cloud/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/point_cloud.html)]
+## Picking [[code](https://github.com/asny/three-d/tree/master/examples/picking/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/picking.html)]
 
-![Point cloud example](https://asny.github.io/three-d/0.15/point_cloud.png)
+![Picking example](https://asny.github.io/three-d/0.18/picking.png)
 
-## Fog [[code](https://github.com/asny/three-d/tree/master/examples/fog/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/fog.html)]
+## Environment [[code](https://github.com/asny/three-d/tree/master/examples/environment/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/environment.html)]
 
-![Fog example](https://asny.github.io/three-d/0.15/fog.png)
+![Environment example](https://asny.github.io/three-d/0.18/environment.png)
 
-## Terrain [[code](https://github.com/asny/three-d/tree/master/examples/terrain/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/terrain.html)]
+## PBR [[code](https://github.com/asny/three-d/tree/master/examples/pbr/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/pbr.html)]
 
-![Terrain example](https://asny.github.io/three-d/0.15/terrain.png)
+![PBR example](https://asny.github.io/three-d/0.18/pbr.png)
 
-## Fireworks [[code](https://github.com/asny/three-d/tree/master/examples/fireworks/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/fireworks.html)]
+## Lighting [[code](https://github.com/asny/three-d/tree/master/examples/lighting/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/lighting.html)]
 
-![Fireworks example](https://asny.github.io/three-d/0.15/fireworks.png)
+![Lighting example](https://asny.github.io/three-d/0.18/lighting.png)
 
-## Statues [[code](https://github.com/asny/three-d/tree/master/examples/statues/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/statues.html)]
+## Lights [[code](https://github.com/asny/three-d/tree/master/examples/lights/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/lights.html)]
 
-![Statues example](https://asny.github.io/three-d/0.15/statues.png)
+![Lights example](https://asny.github.io/three-d/0.18/lights.png)
 
-## Wireframe [[code](https://github.com/asny/three-d/tree/master/examples/wireframe/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/wireframe.html)]
+## Image [[code](https://github.com/asny/three-d/tree/master/examples/image/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/image.html)]
 
-![Wireframe example](https://asny.github.io/three-d/0.15/wireframe.png)
+![Image example](https://asny.github.io/three-d/0.18/image.png)
 
-## Forest [[code](https://github.com/asny/three-d/tree/master/examples/forest/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/forest.html)]
+## Point cloud [[code](https://github.com/asny/three-d/tree/master/examples/point_cloud/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/point_cloud.html)]
 
-![Forest example](https://asny.github.io/three-d/0.15/forest.png)
+![Point cloud example](https://asny.github.io/three-d/0.18/point_cloud.png)
 
-## Volume [[code](https://github.com/asny/three-d/tree/master/examples/volume/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/volume.html)]
+## Fog [[code](https://github.com/asny/three-d/tree/master/examples/fog/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/fog.html)]
 
-![Volume example](https://asny.github.io/three-d/0.15/volume.png)
+![Fog example](https://asny.github.io/three-d/0.18/fog.png)
 
-## Normals [[code](https://github.com/asny/three-d/tree/master/examples/normals/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/normals.html)]
+## Terrain [[code](https://github.com/asny/three-d/tree/master/examples/terrain/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/terrain.html)]
 
-![Normals example](https://asny.github.io/three-d/0.15/normals.png)
+![Terrain example](https://asny.github.io/three-d/0.18/terrain.png)
 
-## Logo [[code](https://github.com/asny/three-d/tree/master/examples/logo/src/main.rs)] [[demo](https://asny.github.io/three-d/0.15/logo.html)]
+## Fireworks [[code](https://github.com/asny/three-d/tree/master/examples/fireworks/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/fireworks.html)]
 
-![Logo example](https://asny.github.io/three-d/0.15/logo.png)
+![Fireworks example](https://asny.github.io/three-d/0.18/fireworks.png)
+
+## Statues [[code](https://github.com/asny/three-d/tree/master/examples/statues/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/statues.html)]
+
+![Statues example](https://asny.github.io/three-d/0.18/statues.png)
+
+## Wireframe [[code](https://github.com/asny/three-d/tree/master/examples/wireframe/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/wireframe.html)]
+
+![Wireframe example](https://asny.github.io/three-d/0.18/wireframe.png)
+
+## Forest [[code](https://github.com/asny/three-d/tree/master/examples/forest/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/forest.html)]
+
+![Forest example](https://asny.github.io/three-d/0.18/forest.png)
+
+## Volume [[code](https://github.com/asny/three-d/tree/master/examples/volume/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/volume.html)]
+
+![Volume example](https://asny.github.io/three-d/0.18/volume.png)
+
+## Normals [[code](https://github.com/asny/three-d/tree/master/examples/normals/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/normals.html)]
+
+![Normals example](https://asny.github.io/three-d/0.18/normals.png)
+
+## Logo [[code](https://github.com/asny/three-d/tree/master/examples/logo/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/logo.html)]
+
+![Logo example](https://asny.github.io/three-d/0.18/logo.png)
+
+## Winit window [[code](https://github.com/asny/three-d/tree/master/examples/winit_window/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/winit_window.html)]
+
+Shows how to easily combine a custom [winit](https://crates.io/crates/winit) window with `three-d` rendering.
+
+![Winit window example](https://asny.github.io/three-d/0.18/winit_window.png)
+
+## Multiwindow [[code](https://github.com/asny/three-d/tree/master/examples/multiwindow/src/main.rs)] [[demo](https://asny.github.io/three-d/0.18/multiwindow.html)]
+
+Shows how to create multiple [winit](https://crates.io/crates/winit) windows and render with `three-d`.
 
 ## Headless [[code](https://github.com/asny/three-d/tree/master/examples/headless/src/main.rs)]
 

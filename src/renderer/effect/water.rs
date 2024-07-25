@@ -8,33 +8,32 @@ pub enum Background {
     /// Environnment texture.
     Texture(Arc<TextureCubeMap>),
     /// Background color.
-    Color(Color),
+    Color(Srgba),
 }
 
 impl Default for Background {
     fn default() -> Self {
-        Self::Color(Color::WHITE)
+        Self::Color(Srgba::WHITE)
     }
 }
 
 ///
-/// A material that simulates a water surface.
-/// This material needs the rendered scene (without the water surface) in a color and depth texture to be able to add reflections/refractions.
-/// Therefore, the material needs to be updated/constructed each frame.
+/// An effect that simulates a water surface and should therefore only be applied to a water surface geometry.
+/// This effect needs the rendered scene (without the water surface) in a color and depth texture to be able to add reflections and refractions.
 ///
 #[derive(Clone)]
-pub struct WaterMaterial {
+pub struct WaterEffect {
     /// The background of the scene which is used for reflections.
     pub background: Background,
     /// A value in the range `[0..1]` specifying how metallic the surface is.
     pub metallic: f32,
     /// A value in the range `[0..1]` specifying how rough the surface is.
     pub roughness: f32,
-    /// The lighting model used when rendering this material
+    /// The lighting model used when rendering this effect
     pub lighting_model: LightingModel,
 }
 
-impl PostMaterial for WaterMaterial {
+impl Effect for WaterEffect {
     fn fragment_shader_source(
         &self,
         lights: &[&dyn Light],
@@ -42,7 +41,7 @@ impl PostMaterial for WaterMaterial {
         depth_texture: Option<DepthTexture>,
     ) -> String {
         format!(
-            "{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}",
             match &self.background {
                 Background::Color(_) => "",
                 Background::Texture(_) => "#define USE_BACKGROUND_TEXTURE",
@@ -54,8 +53,31 @@ impl PostMaterial for WaterMaterial {
                 .expect("Must supply a depth texture to apply a water effect")
                 .fragment_shader_source(),
             lights_shader_source(lights, self.lighting_model),
-            include_str!("shaders/water_material.frag")
+            ToneMapping::fragment_shader_source(),
+            ColorMapping::fragment_shader_source(),
+            include_str!("shaders/water_effect.frag")
         )
+    }
+
+    fn id(&self, color_texture: Option<ColorTexture>, depth_texture: Option<DepthTexture>) -> u16 {
+        0b1u16 << 14
+            | 0b1u16 << 12
+            | 0b1u16 << 11
+            | color_texture
+                .expect("Must supply a color texture to apply a water effect")
+                .id()
+            | depth_texture
+                .expect("Must supply a depth texture to apply a water effect")
+                .id()
+    }
+
+    fn fragment_attributes(&self) -> FragmentAttributes {
+        FragmentAttributes {
+            position: true,
+            normal: true,
+            uv: true,
+            ..FragmentAttributes::NONE
+        }
     }
 
     fn render_states(&self) -> RenderStates {
@@ -73,6 +95,8 @@ impl PostMaterial for WaterMaterial {
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
+        camera.tone_mapping.use_uniforms(program);
+        camera.color_mapping.use_uniforms(program);
         color_texture
             .expect("Must supply a color texture to apply a water effect")
             .use_uniforms(program);
@@ -85,12 +109,12 @@ impl PostMaterial for WaterMaterial {
         program.use_uniform("viewProjection", camera.projection() * camera.view());
         program.use_uniform(
             "viewProjectionInverse",
-            &(camera.projection() * camera.view()).invert().unwrap(),
+            (camera.projection() * camera.view()).invert().unwrap(),
         );
         program.use_uniform("cameraPosition", camera.position());
         program.use_uniform(
             "screenSize",
-            &vec2(
+            vec2(
                 camera.viewport().width as f32,
                 camera.viewport().height as f32,
             ),
@@ -98,13 +122,15 @@ impl PostMaterial for WaterMaterial {
         program.use_uniform("metallic", self.metallic);
         program.use_uniform("roughness", self.roughness);
         match &self.background {
-            Background::Color(color) => program.use_uniform("environmentColor", color),
+            Background::Color(color) => {
+                program.use_uniform("environmentColor", color.to_linear_srgb())
+            }
             Background::Texture(tex) => program.use_texture_cube("environmentMap", tex),
         }
     }
 }
 
-impl Default for WaterMaterial {
+impl Default for WaterEffect {
     fn default() -> Self {
         Self {
             background: Background::default(),

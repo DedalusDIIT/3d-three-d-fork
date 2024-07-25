@@ -10,7 +10,6 @@ use three_d::*;
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "Environment!".to_string(),
-        min_size: (512, 512),
         max_size: Some((1280, 720)),
         ..Default::default()
     })
@@ -45,7 +44,7 @@ pub async fn run() {
         &context,
         &loaded.deserialize("chinese_garden_4k").unwrap(),
     );
-    let light = AmbientLight::new_with_environment(&context, 1.0, Color::WHITE, skybox.texture());
+    let light = AmbientLight::new_with_environment(&context, 1.0, Srgba::WHITE, skybox.texture());
 
     let mut model = Gm::new(
         Mesh::new(&context, &CpuMesh::sphere(32)),
@@ -77,10 +76,10 @@ pub async fn run() {
                     ui.add(Slider::new(&mut model.material.roughness, 0.0..=1.0).text("Roughness"));
                     ui.color_edit_button_rgba_unmultiplied(&mut color);
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = gui_context.used_rect().width();
             },
         );
-        model.material.albedo = Color::from_rgba_slice(&color);
+        model.material.albedo = Srgba::from(color);
 
         let viewport = Viewport {
             x: (panel_width * frame_input.device_pixel_ratio) as i32,
@@ -96,7 +95,8 @@ pub async fn run() {
             .screen()
             .clear(ClearState::color_and_depth(0.5, 0.5, 0.5, 1.0, 1.0))
             .render(&camera, skybox.into_iter().chain(&model), &[&light])
-            .write(|| gui.render());
+            .write(|| gui.render())
+            .unwrap();
 
         FrameOutput::default()
     });

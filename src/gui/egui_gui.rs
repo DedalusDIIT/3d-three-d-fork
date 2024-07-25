@@ -32,11 +32,18 @@ impl GUI {
     pub fn from_gl_context(context: std::sync::Arc<crate::context::Context>) -> Self {
         GUI {
             egui_context: egui::Context::default(),
-            painter: RefCell::new(Painter::new(context, None, "").unwrap()),
+            painter: RefCell::new(Painter::new(context, "", None).unwrap()),
             output: RefCell::new(None),
             viewport: Viewport::new_at_origo(1, 1),
             modifiers: Modifiers::default(),
         }
+    }
+
+    ///
+    /// Get the egui context.
+    ///
+    pub fn context(&self) -> &egui::Context {
+        &self.egui_context
     }
 
     ///
@@ -49,9 +56,11 @@ impl GUI {
         events: &mut [Event],
         accumulated_time_in_ms: f64,
         viewport: Viewport,
-        device_pixel_ratio: f64,
+        device_pixel_ratio: f32,
         callback: impl FnOnce(&egui::Context),
     ) -> bool {
+        self.egui_context
+            .set_pixels_per_point(device_pixel_ratio as f32);
         self.viewport = viewport;
         let egui_input = egui::RawInput {
             screen_rect: Some(egui::Rect {
@@ -66,7 +75,6 @@ impl GUI {
                         + viewport.height as f32 / device_pixel_ratio as f32,
                 },
             }),
-            pixels_per_point: Some(device_pixel_ratio as f32),
             time: Some(accumulated_time_in_ms * 0.001),
             modifiers: (&self.modifiers).into(),
             events: events
@@ -82,6 +90,8 @@ impl GUI {
                                 key: kind.into(),
                                 pressed: true,
                                 modifiers: modifiers.into(),
+                                repeat: false,
+                                physical_key: None,
                             })
                         } else {
                             None
@@ -97,6 +107,8 @@ impl GUI {
                                 key: kind.into(),
                                 pressed: false,
                                 modifiers: modifiers.into(),
+                                repeat: false,
+                                physical_key: None,
                             })
                         } else {
                             None
@@ -111,8 +123,9 @@ impl GUI {
                         if !handled {
                             Some(egui::Event::PointerButton {
                                 pos: egui::Pos2 {
-                                    x: position.0 as f32,
-                                    y: position.1 as f32,
+                                    x: position.x / device_pixel_ratio as f32,
+                                    y: (viewport.height as f32 - position.y)
+                                        / device_pixel_ratio as f32,
                                 },
                                 button: button.into(),
                                 pressed: true,
@@ -131,8 +144,9 @@ impl GUI {
                         if !handled {
                             Some(egui::Event::PointerButton {
                                 pos: egui::Pos2 {
-                                    x: position.0 as f32,
-                                    y: position.1 as f32,
+                                    x: position.x / device_pixel_ratio as f32,
+                                    y: (viewport.height as f32 - position.y)
+                                        / device_pixel_ratio as f32,
                                 },
                                 button: button.into(),
                                 pressed: false,
@@ -147,8 +161,9 @@ impl GUI {
                     } => {
                         if !handled {
                             Some(egui::Event::PointerMoved(egui::Pos2 {
-                                x: position.0 as f32,
-                                y: position.1 as f32,
+                                x: position.x / device_pixel_ratio as f32,
+                                y: (viewport.height as f32 - position.y)
+                                    / device_pixel_ratio as f32,
                             }))
                         } else {
                             None
@@ -156,12 +171,20 @@ impl GUI {
                     }
                     Event::Text(text) => Some(egui::Event::Text(text.clone())),
                     Event::MouseLeave => Some(egui::Event::PointerGone),
-                    Event::MouseWheel { delta, handled, .. } => {
+                    Event::MouseWheel {
+                        delta,
+                        handled,
+                        modifiers,
+                        ..
+                    } => {
                         if !handled {
-                            Some(egui::Event::Scroll(egui::Vec2::new(
-                                delta.0 as f32,
-                                delta.1 as f32,
-                            )))
+                            Some(match modifiers.ctrl {
+                                true => egui::Event::Zoom((delta.1 as f32 / 200.0).exp()),
+                                false => egui::Event::Scroll(match modifiers.shift {
+                                    true => egui::Vec2::new(delta.1 as f32, delta.0 as f32),
+                                    false => egui::Vec2::new(delta.0 as f32, delta.1 as f32),
+                                }),
+                            })
                         } else {
                             None
                         }
@@ -229,14 +252,14 @@ impl GUI {
     /// Render the GUI defined in the [update](Self::update) function.
     /// Must be called in the callback given as input to a [RenderTarget], [ColorTarget] or [DepthTarget] write method.
     ///
-    pub fn render(&self) {
+    pub fn render(&self) -> Result<(), crate::CoreError> {
         let output = self
             .output
             .borrow_mut()
             .take()
             .expect("need to call GUI::update before GUI::render");
-        let clipped_meshes = self.egui_context.tessellate(output.shapes);
         let scale = self.egui_context.pixels_per_point();
+        let clipped_meshes = self.egui_context.tessellate(output.shapes, scale);
         self.painter.borrow_mut().paint_and_update_textures(
             [self.viewport.width, self.viewport.height],
             scale,
@@ -249,6 +272,13 @@ impl GUI {
             use glow::HasContext as _;
             self.painter.borrow().gl().disable(glow::FRAMEBUFFER_SRGB);
         }
+        Ok(())
+    }
+}
+
+impl Drop for GUI {
+    fn drop(&mut self) {
+        self.painter.borrow_mut().destroy();
     }
 }
 

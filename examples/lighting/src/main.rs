@@ -22,7 +22,6 @@ use three_d::*;
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "Lighting!".to_string(),
-        min_size: (512, 512),
         max_size: Some((1280, 720)),
         ..Default::default()
     })
@@ -71,7 +70,7 @@ pub async fn run() {
         PhysicalMaterial::new_opaque(
             &context,
             &CpuMaterial {
-                albedo: Color::new_opaque(128, 200, 70),
+                albedo: Srgba::new_opaque(128, 200, 70),
                 ..Default::default()
             },
         ),
@@ -81,14 +80,14 @@ pub async fn run() {
         DeferredPhysicalMaterial::from_physical_material(&plane.material),
     );
 
-    let mut ambient = AmbientLight::new(&context, 0.2, Color::WHITE);
-    let mut directional0 = DirectionalLight::new(&context, 1.0, Color::RED, &vec3(0.0, -1.0, 0.0));
+    let mut ambient = AmbientLight::new(&context, 0.2, Srgba::WHITE);
+    let mut directional0 = DirectionalLight::new(&context, 1.0, Srgba::RED, &vec3(0.0, -1.0, 0.0));
     let mut directional1 =
-        DirectionalLight::new(&context, 1.0, Color::GREEN, &vec3(0.0, -1.0, 0.0));
+        DirectionalLight::new(&context, 1.0, Srgba::GREEN, &vec3(0.0, -1.0, 0.0));
     let mut spot0 = SpotLight::new(
         &context,
         2.0,
-        Color::BLUE,
+        Srgba::BLUE,
         &vec3(0.0, 0.0, 0.0),
         &vec3(0.0, -1.0, 0.0),
         degrees(25.0),
@@ -101,7 +100,7 @@ pub async fn run() {
     let mut point0 = PointLight::new(
         &context,
         1.0,
-        Color::GREEN,
+        Srgba::GREEN,
         &vec3(0.0, 0.0, 0.0),
         Attenuation {
             constant: 0.5,
@@ -112,7 +111,7 @@ pub async fn run() {
     let mut point1 = PointLight::new(
         &context,
         1.0,
-        Color::RED,
+        Srgba::RED,
         &vec3(0.0, 0.0, 0.0),
         Attenuation {
             constant: 0.5,
@@ -206,6 +205,12 @@ pub async fn run() {
                         "Cook (Trowbridge-Reitz GGX)",
                     );
 
+                    ui.label("Tone mapping");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::None, "None");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::Reinhard, "Reinhard");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::Aces, "Aces");
+                    ui.radio_value(&mut camera.tone_mapping, ToneMapping::Filmic, "Filmic");
+
                     ui.label("Material options");
                     ui.radio_value(&mut material_type, MaterialType::Forward, "Forward");
                     ui.radio_value(&mut material_type, MaterialType::Deferred, "Deferred");
@@ -216,7 +221,7 @@ pub async fn run() {
                     ui.radio_value(&mut material_type, MaterialType::Depth, "Depth");
                     ui.radio_value(&mut material_type, MaterialType::Orm, "ORM");
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = gui_context.used_rect().width();
             },
         );
 
@@ -262,18 +267,21 @@ pub async fn run() {
         screen.clear(ClearState::default());
         match material_type {
             MaterialType::Normal => {
-                screen.write(|| {
-                    model.render_with_material(
-                        &NormalMaterial::from_physical_material(&model.material),
-                        &camera,
-                        &lights,
-                    );
-                    plane.render_with_material(
-                        &NormalMaterial::from_physical_material(&plane.material),
-                        &camera,
-                        &lights,
-                    )
-                });
+                screen
+                    .write::<RendererError>(|| {
+                        model.render_with_material(
+                            &NormalMaterial::from_physical_material(&model.material),
+                            &camera,
+                            &lights,
+                        );
+                        plane.render_with_material(
+                            &NormalMaterial::from_physical_material(&plane.material),
+                            &camera,
+                            &lights,
+                        );
+                        Ok(())
+                    })
+                    .unwrap();
             }
             MaterialType::Depth => {
                 screen.render_with_material(
@@ -284,18 +292,21 @@ pub async fn run() {
                 );
             }
             MaterialType::Orm => {
-                screen.write(|| {
-                    model.render_with_material(
-                        &ORMMaterial::from_physical_material(&model.material),
-                        &camera,
-                        &lights,
-                    );
-                    plane.render_with_material(
-                        &ORMMaterial::from_physical_material(&plane.material),
-                        &camera,
-                        &lights,
-                    )
-                });
+                screen
+                    .write::<RendererError>(|| {
+                        model.render_with_material(
+                            &ORMMaterial::from_physical_material(&model.material),
+                            &camera,
+                            &lights,
+                        );
+                        plane.render_with_material(
+                            &ORMMaterial::from_physical_material(&plane.material),
+                            &camera,
+                            &lights,
+                        );
+                        Ok(())
+                    })
+                    .unwrap();
             }
             MaterialType::Position => {
                 screen.render_with_material(
@@ -314,18 +325,21 @@ pub async fn run() {
                 );
             }
             MaterialType::Color => {
-                screen.write(|| {
-                    model.render_with_material(
-                        &ColorMaterial::from_physical_material(&model.material),
-                        &camera,
-                        &lights,
-                    );
-                    plane.render_with_material(
-                        &ColorMaterial::from_physical_material(&plane.material),
-                        &camera,
-                        &lights,
-                    )
-                });
+                screen
+                    .write::<RendererError>(|| {
+                        model.render_with_material(
+                            &ColorMaterial::from_physical_material(&model.material),
+                            &camera,
+                            &lights,
+                        );
+                        plane.render_with_material(
+                            &ColorMaterial::from_physical_material(&plane.material),
+                            &camera,
+                            &lights,
+                        );
+                        Ok(())
+                    })
+                    .unwrap();
             }
             MaterialType::Forward => {
                 screen.render(&camera, model.into_iter().chain(&plane), &lights);
@@ -338,7 +352,7 @@ pub async fn run() {
                 );
             }
         }
-        screen.write(|| gui.render());
+        screen.write(|| gui.render()).unwrap();
 
         FrameOutput::default()
     });

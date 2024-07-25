@@ -13,7 +13,7 @@ pub struct SpotLight {
     /// The intensity of the light. This allows for higher intensity than 1 which can be used to simulate high intensity light sources like the sun.
     pub intensity: f32,
     /// The base color of the light.
-    pub color: Color,
+    pub color: Srgba,
     /// The position of the light.
     pub position: Vec3,
     /// The direction the light shines.
@@ -29,7 +29,7 @@ impl SpotLight {
     pub fn new(
         context: &Context,
         intensity: f32,
-        color: Color,
+        color: Srgba,
         position: &Vec3,
         direction: &Vec3,
         cutoff: impl Into<Radians>,
@@ -111,14 +111,22 @@ impl SpotLight {
         shadow_texture
             .as_depth_target()
             .clear(ClearState::default())
-            .write(|| {
+            .write::<RendererError>(|| {
                 for geometry in geometries
                     .into_iter()
                     .filter(|g| shadow_camera.in_frustum(&g.aabb()))
                 {
-                    geometry.render_with_material(&depth_material, &shadow_camera, &[]);
+                    render_with_material(
+                        &self.context,
+                        &shadow_camera,
+                        &geometry,
+                        &depth_material,
+                        &[],
+                    );
                 }
-            });
+                Ok(())
+            })
+            .unwrap();
         self.shadow_texture = Some(shadow_texture);
     }
 
@@ -137,7 +145,7 @@ impl Light for SpotLight {
                 "
                     uniform sampler2D shadowMap{};
                     uniform mat4 shadowMVP{};
-        
+
                     uniform vec3 color{};
                     uniform vec3 attenuation{};
                     uniform vec3 position{};
@@ -148,20 +156,20 @@ impl Light for SpotLight {
                         vec3 light_direction = position{} - position;
                         float distance = length(light_direction);
                         light_direction = light_direction / distance;
-        
+
                         float angle = acos(dot(-light_direction, normalize(direction{})));
                         float cutoff = cutoff{};
-                    
+
                         vec3 result = vec3(0.0);
                         if (angle < cutoff) {{
                             vec3 light_color = attenuate(color{}, attenuation{}, distance);
-                            result = calculate_light(light_color, light_direction, surface_color, view_direction, normal, 
+                            result = calculate_light(light_color, light_direction, surface_color, view_direction, normal,
                                 metallic, roughness) * (1.0 - smoothstep(0.75 * cutoff, cutoff, angle));
-                            result *= calculate_shadow(shadowMap{}, shadowMVP{}, position);
+                            result *= calculate_shadow(light_direction, normal, shadowMap{}, shadowMVP{}, position);
                         }}
                         return result;
                     }}
-                
+
                 ", i, i, i, i, i, i, i, i, i, i, i, i, i, i, i)
         } else {
             format!(
@@ -176,41 +184,49 @@ impl Light for SpotLight {
                         vec3 light_direction = position{} - position;
                         float distance = length(light_direction);
                         light_direction = light_direction / distance;
-        
+
                         float angle = acos(dot(-light_direction, normalize(direction{})));
                         float cutoff = cutoff{};
-                    
+
                         vec3 result = vec3(0.0);
                         if (angle < cutoff) {{
                             vec3 light_color = attenuate(color{}, attenuation{}, distance);
-                            result = calculate_light(light_color, light_direction, surface_color, view_direction, normal, 
+                            result = calculate_light(light_color, light_direction, surface_color, view_direction, normal,
                                 metallic, roughness) * (1.0 - smoothstep(0.75 * cutoff, cutoff, angle));
                         }}
                         return result;
                     }}
-                
+
                 ", i, i, i, i, i, i, i, i, i, i, i)
         }
     }
     fn use_uniforms(&self, program: &Program, i: u32) {
         if let Some(ref tex) = self.shadow_texture {
             program.use_depth_texture(&format!("shadowMap{}", i), tex);
-            program.use_uniform(&format!("shadowMVP{}", i), &self.shadow_matrix);
+            program.use_uniform(&format!("shadowMVP{}", i), self.shadow_matrix);
         }
         program.use_uniform(
             &format!("color{}", i),
-            &(self.color.to_vec3() * self.intensity),
+            self.color.to_linear_srgb().truncate() * self.intensity,
         );
         program.use_uniform(
             &format!("attenuation{}", i),
-            &vec3(
+            vec3(
                 self.attenuation.constant,
                 self.attenuation.linear,
                 self.attenuation.quadratic,
             ),
         );
-        program.use_uniform(&format!("position{}", i), &self.position);
-        program.use_uniform(&format!("direction{}", i), &self.direction.normalize());
-        program.use_uniform(&format!("cutoff{}", i), &self.cutoff.0);
+        program.use_uniform(&format!("position{}", i), self.position);
+        program.use_uniform(&format!("direction{}", i), self.direction.normalize());
+        program.use_uniform(&format!("cutoff{}", i), self.cutoff.0);
+    }
+
+    fn id(&self) -> u8 {
+        if self.shadow_texture.is_some() {
+            0b1u8 << 7 | 0b101u8
+        } else {
+            0b1u8 << 7 | 0b110u8
+        }
     }
 }

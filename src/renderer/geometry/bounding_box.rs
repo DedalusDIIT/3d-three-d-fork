@@ -5,7 +5,6 @@ use crate::renderer::*;
 ///
 pub struct BoundingBox {
     mesh: InstancedMesh,
-    aabb: AxisAlignedBoundingBox,
 }
 
 impl BoundingBox {
@@ -46,46 +45,31 @@ impl BoundingBox {
             vec3(max.x, min.y, min.z),
         ];
 
-        let rotations = vec![
-            Quat::zero(),
-            Quat::zero(),
-            Quat::zero(),
-            Quat::zero(),
-            Quat::from_angle_z(degrees(90.0)),
-            Quat::from_angle_z(degrees(90.0)),
-            Quat::from_angle_z(degrees(90.0)),
-            Quat::from_angle_z(degrees(90.0)),
-            Quat::from_angle_y(degrees(-90.0)),
-            Quat::from_angle_y(degrees(-90.0)),
-            Quat::from_angle_y(degrees(-90.0)),
-            Quat::from_angle_y(degrees(-90.0)),
-        ];
-
-        let scales = vec![
-            vec3(size.x, thickness, thickness),
-            vec3(size.x, thickness, thickness),
-            vec3(size.x, thickness, thickness),
-            vec3(size.x, thickness, thickness),
-            vec3(size.y, thickness, thickness),
-            vec3(size.y, thickness, thickness),
-            vec3(size.y, thickness, thickness),
-            vec3(size.y, thickness, thickness),
-            vec3(size.z, thickness, thickness),
-            vec3(size.z, thickness, thickness),
-            vec3(size.z, thickness, thickness),
-            vec3(size.z, thickness, thickness),
-        ];
         let mesh = InstancedMesh::new(
             context,
             &Instances {
-                translations,
-                rotations: Some(rotations),
-                scales: Some(scales),
+                transformations: (0..12)
+                    .map(|i| {
+                        Mat4::from_translation(translations[i])
+                            * match i {
+                                0..=3 => Mat4::from_nonuniform_scale(size.x, thickness, thickness),
+                                4..=7 => {
+                                    Mat4::from_angle_z(degrees(90.0))
+                                        * Mat4::from_nonuniform_scale(size.y, thickness, thickness)
+                                }
+                                8..=11 => {
+                                    Mat4::from_angle_y(degrees(-90.0))
+                                        * Mat4::from_nonuniform_scale(size.z, thickness, thickness)
+                                }
+                                _ => unreachable!(),
+                            }
+                    })
+                    .collect(),
                 ..Default::default()
             },
             &CpuMesh::cylinder(16),
         );
-        Self { mesh, aabb }
+        Self { mesh }
     }
 }
 
@@ -98,29 +82,24 @@ impl<'a> IntoIterator for &'a BoundingBox {
     }
 }
 
+use std::ops::Deref;
+impl Deref for BoundingBox {
+    type Target = InstancedMesh;
+    fn deref(&self) -> &Self::Target {
+        &self.mesh
+    }
+}
+
+impl std::ops::DerefMut for BoundingBox {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.mesh
+    }
+}
+
 impl Geometry for BoundingBox {
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.aabb
-    }
+    impl_geometry_body!(deref);
 
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        self.mesh.render_with_material(material, camera, lights)
-    }
-
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        self.mesh
-            .render_with_post_material(material, camera, lights, color_texture, depth_texture)
+    fn animate(&mut self, time: f32) {
+        self.mesh.animate(time)
     }
 }

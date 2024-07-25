@@ -15,7 +15,8 @@ pub use crate::context::HasContext;
 pub struct Context {
     context: Arc<crate::context::Context>,
     pub(super) vao: crate::context::VertexArray,
-    programs: Arc<RwLock<HashMap<String, Program>>>,
+    /// A cache of programs to avoid recompiling a [Program] every frame.
+    pub programs: Arc<RwLock<HashMap<Vec<u8>, Program>>>,
 }
 
 impl Context {
@@ -26,10 +27,11 @@ impl Context {
     /// you can also call this method with a reference counter to a glow context created using glow and not the re-export in [context](crate::context).
     ///
     pub fn from_gl_context(context: Arc<crate::context::Context>) -> Result<Self, CoreError> {
-        #[cfg(not(target_arch = "wasm32"))]
         unsafe {
-            // Enable seamless cube map textures
-            context.enable(crate::context::TEXTURE_CUBE_MAP_SEAMLESS);
+            if !context.version().is_embedded {
+                // Enable seamless cube map textures - not available on OpenGL ES and WebGL
+                context.enable(crate::context::TEXTURE_CUBE_MAP_SEAMLESS);
+            }
             context.pixel_store_i32(crate::context::UNPACK_ALIGNMENT, 1);
             context.pixel_store_i32(crate::context::PACK_ALIGNMENT, 1);
         };
@@ -37,7 +39,7 @@ impl Context {
             // Create one Vertex Array Object which is then reused all the time.
             let vao = context
                 .create_vertex_array()
-                .map_err(|e| CoreError::ContextCreation(e))?;
+                .map_err(CoreError::ContextCreation)?;
             Self {
                 context,
                 vao,
@@ -48,27 +50,6 @@ impl Context {
     }
 
     ///
-    /// Compiles a [Program] with the given vertex and fragment shader source and stores it for later use.
-    /// If it has already been created, then it is just returned.
-    ///
-    pub fn program(
-        &self,
-        vertex_shader_source: &str,
-        fragment_shader_source: &str,
-        callback: impl FnOnce(&Program),
-    ) -> Result<(), CoreError> {
-        let key = format!("{}{}", vertex_shader_source, fragment_shader_source);
-        if !self.programs.read().unwrap().contains_key(&key) {
-            self.programs.write().unwrap().insert(
-                key.clone(),
-                Program::from_source(self, vertex_shader_source, fragment_shader_source)?,
-            );
-        };
-        callback(self.programs.read().unwrap().get(&key).unwrap());
-        Ok(())
-    }
-
-    ///
     /// Set the scissor test for this context (see [ScissorBox]).
     ///
     pub fn set_scissor(&self, scissor_box: ScissorBox) {
@@ -76,8 +57,8 @@ impl Context {
             if scissor_box.width > 0 && scissor_box.height > 0 {
                 self.enable(crate::context::SCISSOR_TEST);
                 self.scissor(
-                    scissor_box.x as i32,
-                    scissor_box.y as i32,
+                    scissor_box.x,
+                    scissor_box.y,
                     scissor_box.width as i32,
                     scissor_box.height as i32,
                 );

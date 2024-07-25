@@ -1,27 +1,45 @@
-#![allow(unsafe_code)]
-use crate::core::Context;
-use glutin::dpi::PhysicalSize;
-use glutin::event_loop::EventLoop;
-use glutin::{ContextBuilder, ContextCurrentState, CreationError, NotCurrent, PossiblyCurrent};
-use std::ops::Deref;
+use crate::{Context, CoreError};
+use glutin_029::{
+    dpi::PhysicalSize, event_loop::EventLoop, ContextBuilder, ContextCurrentState, CreationError,
+    NotCurrent, PossiblyCurrent,
+};
 use std::rc::Rc;
+use thiserror::Error;
 
-/// A headless graphics context (a graphics context that is not associated with any window).
+///
+/// Error associated with a headless context.
+///
+#[derive(Error, Debug)]
+#[allow(missing_docs)]
+pub enum HeadlessError {
+    #[error("glutin error")]
+    GlutinCreationError(#[from] glutin_029::CreationError),
+    #[error("glutin error")]
+    GlutinContextError(#[from] glutin_029::ContextError),
+    #[error("error in three-d")]
+    ThreeDError(#[from] CoreError),
+}
+
+///
+/// A headless graphics context, ie. a graphics context that is not associated with any window.
+/// For a graphics context associated with a window, see [WindowedContext](crate::WindowedContext).
+/// Can only be created on native, not on web.
+///
 #[derive(Clone)]
 pub struct HeadlessContext {
     context: Context,
-    _glutin_context: Rc<glutin::Context<PossiblyCurrent>>,
+    _glutin_context: Rc<glutin_029::Context<PossiblyCurrent>>,
 }
 
 impl HeadlessContext {
     ///
-    /// Creates a new headless graphics context (a graphics context that is not associated with any window).
+    /// Creates a new headless graphics context.
     ///
-    ///
-    pub fn new() -> Result<Self, super::WindowError> {
+    #[allow(unsafe_code)]
+    pub fn new() -> Result<Self, HeadlessError> {
         let cb = ContextBuilder::new();
-        let (glutin_context, _el) = build_context(cb).unwrap();
-        let glutin_context = unsafe { glutin_context.make_current().unwrap() };
+        let glutin_context = build_context(cb)?;
+        let glutin_context = unsafe { glutin_context.make_current().map_err(|(_, e)| e)? };
         let context = Context::from_gl_context(std::sync::Arc::new(unsafe {
             crate::context::Context::from_loader_function(|s| {
                 glutin_context.get_proc_address(s) as *const _
@@ -34,9 +52,8 @@ impl HeadlessContext {
     }
 }
 
-impl Deref for HeadlessContext {
+impl std::ops::Deref for HeadlessContext {
     type Target = Context;
-
     fn deref(&self) -> &Self::Target {
         &self.context
     }
@@ -46,15 +63,15 @@ impl Deref for HeadlessContext {
 fn build_context_surfaceless<T1: ContextCurrentState>(
     cb: ContextBuilder<T1>,
     el: &EventLoop<()>,
-) -> Result<glutin::Context<NotCurrent>, CreationError> {
-    use glutin::platform::unix::HeadlessContextExt;
+) -> Result<glutin_029::Context<NotCurrent>, CreationError> {
+    use glutin_029::platform::unix::HeadlessContextExt;
     cb.build_surfaceless(&el)
 }*/
 
 fn build_context_headless<T1: ContextCurrentState>(
     cb: ContextBuilder<T1>,
     el: &EventLoop<()>,
-) -> Result<glutin::Context<NotCurrent>, CreationError> {
+) -> Result<glutin_029::Context<NotCurrent>, CreationError> {
     let size_one = PhysicalSize::new(1, 1);
     cb.build_headless(&el, size_one)
 }
@@ -62,8 +79,8 @@ fn build_context_headless<T1: ContextCurrentState>(
 #[cfg(target_os = "linux")]
 fn build_context_osmesa<T1: ContextCurrentState>(
     cb: ContextBuilder<T1>,
-) -> Result<glutin::Context<NotCurrent>, CreationError> {
-    use glutin::platform::unix::HeadlessContextExt;
+) -> Result<glutin_029::Context<NotCurrent>, CreationError> {
+    use glutin_029::platform::unix::HeadlessContextExt;
     let size_one = PhysicalSize::new(1, 1);
     cb.build_osmesa(size_one)
 }
@@ -71,7 +88,7 @@ fn build_context_osmesa<T1: ContextCurrentState>(
 #[cfg(target_os = "linux")]
 fn build_context<T1: ContextCurrentState>(
     cb: ContextBuilder<T1>,
-) -> Result<(glutin::Context<NotCurrent>, EventLoop<()>), [CreationError; 2]> {
+) -> Result<glutin_029::Context<NotCurrent>, CreationError> {
     // On unix operating systems, you should always try for surfaceless first,
     // and if that does not work, headless (pbuffers), and if that too fails,
     // finally osmesa.
@@ -79,7 +96,6 @@ fn build_context<T1: ContextCurrentState>(
     // If willing, you could attempt to use hidden windows instead of os mesa,
     // but note that you must handle events for the window that come on the
     // events loop.
-    let el = EventLoop::new();
 
     /*
     let err1 = match build_context_surfaceless(cb.clone(), &el) {
@@ -87,25 +103,27 @@ fn build_context<T1: ContextCurrentState>(
         Err(err) => err,
     };*/
 
-    let err2 = match build_context_headless(cb.clone(), &el) {
-        Ok(ctx) => return Ok((ctx, el)),
+    let _err3 = match build_context_osmesa(cb.clone()) {
+        Ok(ctx) => return Ok(ctx),
         Err(err) => err,
     };
 
-    let err3 = match build_context_osmesa(cb) {
-        Ok(ctx) => return Ok((ctx, el)),
+    let el = EventLoop::new();
+
+    let err2 = match build_context_headless(cb, &el) {
+        Ok(ctx) => return Ok(ctx),
         Err(err) => err,
     };
 
-    Err([err2, err3])
+    Err(err2)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn build_context<T1: ContextCurrentState>(
     cb: ContextBuilder<T1>,
-) -> Result<(glutin::Context<NotCurrent>, EventLoop<()>), CreationError> {
+) -> Result<glutin_029::Context<NotCurrent>, CreationError> {
     let el = EventLoop::new();
-    build_context_headless(cb.clone(), &el).map(|ctx| (ctx, el))
+    build_context_headless(cb.clone(), &el)
 }
 
 #[cfg(target_os = "windows")]
