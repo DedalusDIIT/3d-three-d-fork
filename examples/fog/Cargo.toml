@@ -8,7 +8,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-three-d = { path = "../../" }
+log = "0.4.14"
+cgmath = "0.18"
+
+three-d = { path = "../../", features = ["winit"] }
 three-d-asset = {version="0.4", features = ["obj", "http"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
