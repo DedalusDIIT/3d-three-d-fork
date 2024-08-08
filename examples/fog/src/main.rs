@@ -12,6 +12,7 @@ use three_d::*;
 
 use cgmath::SquareMatrix;
 use log::error;
+use once_cell::unsync::Lazy;
 use three_d::{
     AxisAlignedBoundingBox, Camera, ColorTexture, Context, CpuMesh, DepthTexture, ElementBuffer, Geometry, Indices,
     Light, Mat4, Material, Positions, PostMaterial, Program, RenderStates, Vec3, VertexBuffer,
@@ -182,7 +183,6 @@ pub fn cube() -> CpuMesh {
     };
 }
 
-
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "Fog!".to_string(),
@@ -227,22 +227,31 @@ pub async fn run() {
 
     // cube
 
-    let mut cube_mesh = CubeMesh::new(&context);
+    let cube_mesh = CubeMesh::new(&context);
 
     // main loop
-    let mut color_texture = Rc::new(RefCell::new(Texture2D::new_empty::<[u8; 4]>(
-        &context,
-        1,
-        1,
-        Interpolation::Nearest,
-        Interpolation::Nearest,
-        None,
-        Wrapping::ClampToEdge,
-        Wrapping::ClampToEdge,
-    )));
-    let mut depth_texture =
-        DepthTexture2D::new::<f32>(&context, 1, 1, Wrapping::ClampToEdge, Wrapping::ClampToEdge);
-    window.render_loop({ let mut color_texture = color_texture.clone(); move |mut frame_input| {
+    window.render_loop(move |mut frame_input| {
+        let color_texture = Lazy::new(|| { return Rc::new(RefCell::new(Texture2D::new_empty::<[f32; 4]>(
+            &context,
+            frame_input.viewport.width,
+            frame_input.viewport.height,
+            Interpolation::Linear,
+            Interpolation::Linear,
+            None,
+            Wrapping::ClampToEdge,
+            Wrapping::ClampToEdge,
+        )))});
+        // let mut depth_texture = Lazy::new(|| { return DepthTexture2D::new::<f32>(
+        //     &context,
+        //     frame_input.viewport.width,
+        //     frame_input.viewport.height,
+        //     Wrapping::ClampToEdge,
+        //     Wrapping::ClampToEdge,
+        // )});
+
+
+
+
         let mut change = frame_input.first_frame;
         change |= camera.set_viewport(frame_input.viewport);
         change |= control.handle_events(&mut camera, &mut frame_input.events);
@@ -260,32 +269,10 @@ pub async fn run() {
             }
         }
 
-        if change {
             // Draw the scene to a render target if a change has occured
-            color_texture = Rc::new(RefCell::new(Texture2D::new_empty::<[u8; 4]>(
-                &context,
-                frame_input.viewport.width,
-                frame_input.viewport.height,
-                Interpolation::Nearest,
-                Interpolation::Nearest,
-                None,
-                Wrapping::ClampToEdge,
-                Wrapping::ClampToEdge,
-            )));
-            depth_texture = DepthTexture2D::new::<f32>(
-                &context,
-                frame_input.viewport.width,
-                frame_input.viewport.height,
-                Wrapping::ClampToEdge,
-                Wrapping::ClampToEdge,
-            );
-            RenderTarget::new(
-                color_texture.borrow_mut().as_color_target(None),
-                depth_texture.as_depth_target(),
-            )
+        color_texture.borrow_mut().as_color_target(None)
             .clear(ClearState::default())
             .render(&camera, &monkey, &[&ambient, &directional]);
-        }
 
         if fog_enabled {
 
@@ -301,28 +288,29 @@ pub async fn run() {
                 //     frame_input.viewport,
                 //     WriteMask::default(),
                 // )
-                .write({ let color_texture = color_texture.clone(); || {
-                    fog_effect.apply(
-                        &context,
-                        frame_input.accumulated_time,
-                        &camera,
-                        DepthTexture::Single(&depth_texture),
-                    );
+                .write(|| {
+                    // fog_effect.apply(
+                    //     &context,
+                    //     frame_input.accumulated_time,
+                    //     &camera,
+                    //     DepthTexture::Single(&depth_texture),
+                    // );
 
                     cube_mesh.render_with_material(&main_material, &camera, &[]);
-                }});
-        } else if change {
-            // If a change has happened and no fog is applied, copy the result to the screen
-            frame_input.screen().copy_from_color(
-                ColorTexture::Single(&color_texture.borrow()),
-                frame_input.viewport,
-                WriteMask::default(),
-            );
+                });
         }
+        // else if change {
+        //     // If a change has happened and no fog is applied, copy the result to the screen
+        //     frame_input.screen().copy_from_color(
+        //         ColorTexture::Single(&color_texture.borrow()),
+        //         frame_input.viewport,
+        //         WriteMask::default(),
+        //     );
+        // }
 
         FrameOutput {
             swap_buffers: change || fog_enabled,
             ..Default::default()
         }
-    }});
+    });
 }
