@@ -526,6 +526,46 @@ impl Program {
     }
 
     ///
+    /// Draws lines and is copied and modified from: draw_subset_of_elements()
+    /// Currently local implementation in our fork.
+    ///
+    pub fn draw_lines(
+        &self,
+        render_states: RenderStates,
+        viewport: Viewport,
+        element_buffer: &ElementBuffer,
+        first: u32,
+        count: u32,
+    ) {
+        self.context.set_viewport(viewport);
+        self.context.set_render_states(render_states);
+        self.use_program();
+        element_buffer.bind();
+        unsafe {
+            self.context.draw_elements(
+                crate::context::LINES,
+                count as i32,
+                element_buffer.data_type(),
+                first as i32,
+            );
+            self.context
+                .bind_buffer(crate::context::ELEMENT_ARRAY_BUFFER, None);
+
+            for location in self.attributes.values() {
+                self.context.disable_vertex_attrib_array(*location);
+            }
+            self.context.bind_vertex_array(None);
+        }
+        self.unuse_program();
+
+        #[cfg(debug_assertions)]
+        self.context
+            .error_check()
+            .expect("Unexpected rendering error occured")
+    }
+
+
+    ///
     /// Same as [Program::draw_elements] except it renders 'instance_count' instances of the same set of triangles.
     /// Use the [Program::use_instance_attribute] method to send unique data for each instance to the shader.
     ///
