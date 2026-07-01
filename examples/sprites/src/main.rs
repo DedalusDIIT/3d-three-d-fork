@@ -29,14 +29,15 @@ pub async fn run() {
 
     let axes = Axes::new(&context, 0.1, 1.0);
 
-    let img = three_d_asset::io::load_async(&["examples/assets/test_texture.jpg"])
+    let mut img: CpuTexture = three_d_asset::io::load_async(&["examples/assets/test_texture.jpg"])
         .await
         .unwrap()
         .deserialize("")
         .unwrap();
+    img.data.to_linear_srgb();
     let material = ColorMaterial {
-        color: Color::WHITE,
-        texture: Some(std::sync::Arc::new(Texture2D::new(&context, &img))),
+        color: Srgba::WHITE,
+        texture: Some(Texture2DRef::from_cpu_texture(&context, &img)),
         ..Default::default()
     };
 
@@ -70,9 +71,9 @@ pub async fn run() {
         Some(vec3(1.0, 1.0, 0.0).normalize()),
     );
 
-    let ambient = AmbientLight::new(&context, 1.0, Color::WHITE);
+    let ambient = AmbientLight::new(&context, 1.0, Srgba::WHITE);
 
-    window.render_loop(move |mut frame_input: FrameInput| {
+    window.render_loop(move |mut frame_input| {
         camera.set_viewport(frame_input.viewport);
         control.handle_events(&mut camera, &mut frame_input.events);
 

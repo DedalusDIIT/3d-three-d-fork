@@ -42,9 +42,9 @@ pub async fn run() {
         10000.0,
     );
     let mut control = OrbitControl::new(
-        *primary_camera.target(),
-        0.5 * primary_camera.target().distance(*primary_camera.position()),
-        5.0 * primary_camera.target().distance(*primary_camera.position()),
+        primary_camera.target(),
+        0.5 * primary_camera.target().distance(primary_camera.position()),
+        5.0 * primary_camera.target().distance(primary_camera.position()),
     );
 
     // Models from http://texturedmesh.isti.cnr.it/
@@ -90,17 +90,19 @@ pub async fn run() {
         m.set_transformation(Mat4::from_angle_x(degrees(-90.0)));
     });
 
-    let ambient = AmbientLight::new(&context, 0.4, Color::WHITE);
+    let ambient = AmbientLight::new(&context, 0.4, Srgba::WHITE);
     let mut directional = DirectionalLight::new(
         &context,
         10.0,
-        Color::new_opaque(204, 178, 127),
-        &vec3(0.0, -1.0, -1.0),
+        Srgba::new_opaque(204, 178, 127),
+        vec3(0.0, -1.0, -1.0),
     );
-    directional.generate_shadow_map(
-        1024,
-        models.iter().flat_map(|m| m.into_iter()).chain(&fountain),
-    );
+    directional
+        .generate_shadow_map(
+            1024,
+            models.iter().flat_map(|m| m.into_iter()).chain(&fountain),
+        )
+        .unwrap();
     // Bounding boxes
     let mut aabb = AxisAlignedBoundingBox::EMPTY;
     let mut bounding_boxes = Vec::new();
@@ -108,16 +110,16 @@ pub async fn run() {
         bounding_boxes.push(Gm::new(
             BoundingBox::new_with_thickness(&context, geometry.aabb(), 0.5),
             ColorMaterial {
-                color: Color::RED,
+                color: Srgba::RED,
                 ..Default::default()
             },
         ));
-        aabb.expand_with_aabb(&geometry.aabb());
+        aabb.expand_with_aabb(geometry.aabb());
     }
     bounding_boxes.push(Gm::new(
         BoundingBox::new_with_thickness(&context, aabb, 3.0),
         ColorMaterial {
-            color: Color::BLACK,
+            color: Srgba::BLACK,
             ..Default::default()
         },
     ));
@@ -132,16 +134,16 @@ pub async fn run() {
             frame_input.accumulated_time,
             frame_input.viewport,
             frame_input.device_pixel_ratio,
-            |gui_context| {
+            |ui| {
                 use three_d::egui::*;
-                SidePanel::left("side_panel").show(gui_context, |ui| {
+                Panel::left("side_panel").show_inside(ui, |ui| {
                     ui.heading("Debug Panel");
                     ui.radio_value(&mut camera_type, CameraType::Primary, "Primary camera");
                     ui.radio_value(&mut camera_type, CameraType::Secondary, "Secondary camera");
 
                     ui.checkbox(&mut bounding_box_enabled, "Bounding boxes");
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = frame_input.window_width as f32 - ui.available_width();
             },
         );
 
@@ -157,6 +159,7 @@ pub async fn run() {
         control.handle_events(&mut primary_camera, &mut frame_input.events);
 
         // draw
+        let frustum = primary_camera.frustum();
         frame_input
             .screen()
             .clear(ClearState::color_and_depth(0.8, 0.8, 0.7, 1.0, 1.0))
@@ -169,7 +172,7 @@ pub async fn run() {
                     .iter()
                     .flatten()
                     .chain(&fountain)
-                    .filter(|o| primary_camera.in_frustum(&o.aabb()))
+                    .filter(|o| frustum.contains(o.aabb()))
                 {
                     object.render(camera, &[&ambient, &directional]);
                 }
@@ -178,8 +181,9 @@ pub async fn run() {
                         bounding_box.render(camera, &[]);
                     }
                 }
-                gui.render();
-            });
+                gui.render()
+            })
+            .unwrap();
 
         FrameOutput::default()
     });

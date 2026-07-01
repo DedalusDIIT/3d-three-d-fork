@@ -10,9 +10,9 @@ use crate::renderer::*;
 ///
 pub struct Sprites {
     context: Context,
-    position_buffer: VertexBuffer,
-    uv_buffer: VertexBuffer,
-    center_buffer: InstanceBuffer,
+    position_buffer: VertexBuffer<Vec3>,
+    uv_buffer: VertexBuffer<Vec2>,
+    center_buffer: InstanceBuffer<Vec3>,
     transformation: Mat4,
     direction: Option<Vec3>,
 }
@@ -24,7 +24,7 @@ impl Sprites {
     ///
     pub fn new(context: &Context, centers: &[Vec3], direction: Option<Vec3>) -> Self {
         let position_buffer = VertexBuffer::new_with_data(
-            &context,
+            context,
             &[
                 vec3(-1.0, -1.0, 0.0),
                 vec3(1.0, -1.0, 0.0),
@@ -35,7 +35,7 @@ impl Sprites {
             ],
         );
         let uv_buffer = VertexBuffer::new_with_data(
-            &context,
+            context,
             &[
                 vec2(0.0, 0.0),
                 vec2(1.0, 0.0),
@@ -83,17 +83,19 @@ impl Sprites {
         self.center_buffer.fill(centers);
     }
 
-    fn draw(&self, program: &Program, render_states: RenderStates, camera: &Camera) {
-        program.use_uniform("eye", camera.position());
-        program.use_uniform("viewProjection", camera.projection() * camera.view());
+    fn draw(&self, program: &Program, render_states: RenderStates, viewer: &dyn Viewer) {
+        program.use_uniform("eye", viewer.position());
+        program.use_uniform("viewProjection", viewer.projection() * viewer.view());
         program.use_uniform("transformation", self.transformation);
         program.use_vertex_attribute("position", &self.position_buffer);
-        program.use_vertex_attribute("uv_coordinate", &self.uv_buffer);
+        if program.requires_attribute("uv_coordinate") {
+            program.use_vertex_attribute("uv_coordinate", &self.uv_buffer);
+        }
         program.use_instance_attribute("center", &self.center_buffer);
         program.use_uniform("direction", self.direction.unwrap_or(vec3(0.0, 0.0, 0.0)));
         program.draw_arrays_instanced(
             render_states,
-            camera.viewport(),
+            viewer.viewport(),
             6,
             self.center_buffer.instance_count(),
         )
@@ -110,45 +112,48 @@ impl<'a> IntoIterator for &'a Sprites {
 }
 
 impl Geometry for Sprites {
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
+        self.draw(program, render_states, viewer);
+    }
+
+    fn vertex_shader_source(&self) -> String {
+        include_str!("shaders/sprites.vert").to_owned()
+    }
+
+    fn id(&self) -> GeometryId {
+        GeometryId::Sprites
+    }
+
     fn render_with_material(
         &self,
         material: &dyn Material,
-        camera: &Camera,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
     ) {
-        let fragment_shader_source = material.fragment_shader_source(false, lights);
-        self.context
-            .program(
-                &include_str!("shaders/sprites.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader")
+        if let Err(e) = render_with_material(&self.context, viewer, &self, material, lights) {
+            panic!("{}", e.to_string());
+        }
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        let fragment_shader_source =
-            material.fragment_shader_source(lights, color_texture, depth_texture);
-        self.context
-            .program(
-                &include_str!("shaders/sprites.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights, color_texture, depth_texture);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader")
+        if let Err(e) = render_with_effect(
+            &self.context,
+            viewer,
+            self,
+            material,
+            lights,
+            color_texture,
+            depth_texture,
+        ) {
+            panic!("{}", e.to_string());
+        }
     }
 
     fn aabb(&self) -> AxisAlignedBoundingBox {

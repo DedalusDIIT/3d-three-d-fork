@@ -1,8 +1,11 @@
 
 
 uniform samplerCube environmentMap;
+uniform vec3 direction;
+uniform vec3 up;
+uniform uint sampleCount;
 
-in vec3 pos;
+in vec2 uvs;
 
 layout (location = 0) out vec4 outColor;
 
@@ -13,16 +16,17 @@ void main()
     // incoming radiance of the environment. The result of this radiance
     // is the radiance of light coming from -Normal direction, which is what
     // we use in the PBR shader to sample irradiance.
-    vec3 N = normalize(pos);
+    vec3 right = cross(direction, up);
+    vec3 N = normalize(up * (uvs.y - 0.5) * 2.0 + right * (uvs.x - 0.5) * 2.0 + direction);
 
     vec3 irradiance = vec3(0.0);   
     
     // tangent space calculation from origin point
     vec3 up    = vec3(0.0, 1.0, 0.0);
-    vec3 right = normalize(cross(up, N));
+    right = normalize(cross(up, N));
     up         = normalize(cross(N, right));
        
-    float sampleDelta = 0.005 * PI;
+    float sampleDelta = 2.0 * PI / float(sampleCount);
     float nrSamples = 0.0;
     for(float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
     {

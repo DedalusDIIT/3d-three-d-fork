@@ -17,6 +17,10 @@ mod texture2d_array;
 #[doc(inline)]
 pub use texture2d_array::*;
 
+mod texture2d_multisample;
+#[doc(inline)]
+pub(in crate::core) use texture2d_multisample::*;
+
 mod texture3d;
 #[doc(inline)]
 pub use texture3d::*;
@@ -29,9 +33,14 @@ mod depth_texture_cube_map;
 #[doc(inline)]
 pub use depth_texture_cube_map::*;
 
+mod depth_texture2d_multisample;
+#[doc(inline)]
+pub(in crate::core) use depth_texture2d_multisample::*;
+
 use data_type::*;
 pub use three_d_asset::texture::{
-    Interpolation, Texture2D as CpuTexture, Texture3D as CpuTexture3D, TextureData, Wrapping,
+    Interpolation, Mipmap, Texture2D as CpuTexture, Texture3D as CpuTexture3D, TextureData,
+    Wrapping,
 };
 
 /// The basic data type used for each channel of each pixel in a texture.
@@ -48,10 +57,7 @@ impl<T: TextureDataType + PrimitiveDataType> TextureDataType for [T; 2] {}
 impl<T: TextureDataType + PrimitiveDataType> TextureDataType for [T; 3] {}
 impl<T: TextureDataType + PrimitiveDataType> TextureDataType for [T; 4] {}
 
-impl TextureDataType for Color {}
 impl TextureDataType for Quat {}
-
-impl<T: TextureDataType + ?Sized> TextureDataType for &T {}
 
 /// The basic data type used for each pixel in a depth texture.
 pub trait DepthTextureDataType: DepthDataType {}
@@ -107,6 +113,66 @@ impl ColorTexture<'_> {
             ColorTexture::CubeMap { texture, .. } => texture.height(),
         }
     }
+
+    ///
+    /// Returns the fragment shader source for using this texture in a shader.
+    ///
+    pub fn fragment_shader_source(&self) -> String {
+        match self {
+            Self::Single(_) => "
+                uniform sampler2D colorMap;
+                vec4 sample_color(vec2 uv)
+                {
+                    return texture(colorMap, uv);
+                }"
+            .to_owned(),
+            Self::Array { .. } => "
+                uniform sampler2DArray colorMap;
+                uniform int colorLayers[4];
+                vec4 sample_color(vec2 uv)
+                {
+                    return texture(colorMap, vec3(uv, colorLayers[0]));
+                }
+                vec4 sample_layer(vec2 uv, int index)
+                {
+                    return texture(colorMap, vec3(uv, colorLayers[index]));
+                }"
+            .to_owned(),
+            Self::CubeMap { .. } => todo!(),
+        }
+    }
+
+    ///
+    /// Returns a unique ID for each variation of the shader source returned from [ColorTexture::fragment_shader_source].
+    ///
+    pub fn id(&self) -> u16 {
+        match self {
+            Self::Single { .. } => 1u16 << 3,
+            Self::Array { .. } => 10u16 << 3,
+            Self::CubeMap { .. } => {
+                todo!()
+            }
+        }
+    }
+
+    ///
+    /// Sends the uniform data needed for this texture to the fragment shader.
+    ///
+    pub fn use_uniforms(&self, program: &Program) {
+        match self {
+            Self::Single(texture) => program.use_texture("colorMap", texture),
+            Self::Array { texture, layers } => {
+                let mut la: [i32; 4] = [0; 4];
+                layers
+                    .iter()
+                    .enumerate()
+                    .for_each(|(i, l)| la[i] = *l as i32);
+                program.use_uniform_array("colorLayers", &la);
+                program.use_texture_array("colorMap", texture);
+            }
+            Self::CubeMap { .. } => todo!(),
+        }
+    }
 }
 
 ///
@@ -151,6 +217,58 @@ impl DepthTexture<'_> {
             DepthTexture::CubeMap { texture, .. } => texture.height(),
         }
     }
+    ///
+    /// Returns the fragment shader source for using this texture in a shader.
+    ///
+    pub fn fragment_shader_source(&self) -> String {
+        match self {
+            Self::Single { .. } => "
+                uniform sampler2D depthMap;
+                float sample_depth(vec2 uv)
+                {
+                    return texture(depthMap, uv).x;
+                }"
+            .to_owned(),
+            Self::Array { .. } => "
+                uniform sampler2DArray depthMap;
+                uniform int depthLayer;
+                float sample_depth(vec2 uv)
+                {
+                    return texture(depthMap, vec3(uv, depthLayer)).x;
+                }"
+            .to_owned(),
+            Self::CubeMap { .. } => {
+                todo!()
+            }
+        }
+    }
+
+    ///
+    /// Returns a unique ID for each variation of the shader source returned from [DepthTexture::fragment_shader_source].
+    ///
+    pub fn id(&self) -> u16 {
+        match self {
+            Self::Single { .. } => 1u16,
+            Self::Array { .. } => 10u16,
+            Self::CubeMap { .. } => {
+                todo!()
+            }
+        }
+    }
+
+    ///
+    /// Sends the uniform data needed for this texture to the fragment shader.
+    ///
+    pub fn use_uniforms(&self, program: &Program) {
+        match self {
+            Self::Single(texture) => program.use_depth_texture("depthMap", texture),
+            Self::Array { texture, layer } => {
+                program.use_uniform("depthLayer", layer);
+                program.use_depth_texture_array("depthMap", texture);
+            }
+            Self::CubeMap { .. } => todo!(),
+        }
+    }
 }
 
 use crate::core::*;
@@ -166,19 +284,22 @@ fn set_parameters(
     target: u32,
     min_filter: Interpolation,
     mag_filter: Interpolation,
-    mip_map_filter: Option<Interpolation>,
+    mipmap: Option<Mipmap>,
     wrap_s: Wrapping,
     wrap_t: Wrapping,
     wrap_r: Option<Wrapping>,
 ) {
     unsafe {
-        match mip_map_filter {
+        match mipmap {
             None => context.tex_parameter_i32(
                 target,
                 crate::context::TEXTURE_MIN_FILTER,
                 interpolation_from(min_filter),
             ),
-            Some(Interpolation::Nearest) => {
+            Some(Mipmap {
+                filter: Interpolation::Nearest,
+                ..
+            }) => {
                 if min_filter == Interpolation::Nearest {
                     context.tex_parameter_i32(
                         target,
@@ -193,7 +314,10 @@ fn set_parameters(
                     )
                 }
             }
-            Some(Interpolation::Linear) => {
+            Some(Mipmap {
+                filter: Interpolation::Linear,
+                ..
+            }) => {
                 if min_filter == Interpolation::Nearest {
                     context.tex_parameter_i32(
                         target,
@@ -207,6 +331,26 @@ fn set_parameters(
                         crate::context::LINEAR_MIPMAP_LINEAR as i32,
                     )
                 }
+            }
+            _ => panic!("Can only sample textures using 'NEAREST' or 'LINEAR' interpolation"),
+        }
+        if let Some(Mipmap { max_ratio, .. }) = mipmap {
+            let extensions = context.supported_extensions();
+            // Desktop
+            if extensions.contains("GL_ARB_texture_filter_anisotropic") ||
+                extensions.contains("GL_EXT_texture_filter_anisotropic") ||
+                // Web
+                extensions.contains("EXT_texture_filter_anisotropic")
+            {
+                let max_ratio = max_ratio.min(
+                    context.get_parameter_i32(crate::context::MAX_TEXTURE_MAX_ANISOTROPY_EXT)
+                        as u32,
+                );
+                context.tex_parameter_i32(
+                    target,
+                    crate::context::TEXTURE_MAX_ANISOTROPY_EXT,
+                    max_ratio as i32,
+                );
             }
         }
         context.tex_parameter_i32(
@@ -230,18 +374,27 @@ fn set_parameters(
     }
 }
 
-fn calculate_number_of_mip_maps(
-    mip_map_filter: Option<Interpolation>,
+fn calculate_number_of_mip_maps<T: TextureDataType>(
+    mipmap: Option<Mipmap>,
     width: u32,
     height: u32,
     depth: Option<u32>,
 ) -> u32 {
-    if mip_map_filter.is_some()
-        && width == height
-        && depth.map(|d| d == width).unwrap_or(true)
-        && width.is_power_of_two()
+    // Cannot generate mip maps for RGB16F or RGB32F textures on web (https://registry.khronos.org/webgl/extensions/EXT_color_buffer_float/)
+    if (T::data_type() == crate::context::FLOAT || T::data_type() == crate::context::HALF_FLOAT)
+        && T::size() == 3
     {
-        (width as f64).log2() as u32 + 1
+        return 1;
+    }
+
+    if let Some(Mipmap { max_levels, .. }) = mipmap {
+        let max_size = width.max(height).max(depth.unwrap_or(0));
+        if max_size < 2 {
+            1
+        } else {
+            let power_of_two = max_size.next_power_of_two();
+            ((power_of_two as f64).log2() as u32).min(max_levels.max(1))
+        }
     } else {
         1
     }
@@ -259,6 +412,7 @@ fn interpolation_from(interpolation: Interpolation) -> i32 {
     (match interpolation {
         Interpolation::Nearest => crate::context::NEAREST,
         Interpolation::Linear => crate::context::LINEAR,
+        _ => panic!("Can only sample textures using 'NEAREST' or 'LINEAR' interpolation"),
     }) as i32
 }
 
@@ -273,7 +427,7 @@ fn check_data_length<T: TextureDataType>(
     let actual_bytes = data_len * std::mem::size_of::<T>();
     if expected_bytes != actual_bytes {
         panic!(
-            "invalid size of texture data (got {} bytes but expected {} bytes)",
+            "invalid size of texture data (expected {} bytes but got {} bytes)",
             expected_bytes, actual_bytes
         )
     }

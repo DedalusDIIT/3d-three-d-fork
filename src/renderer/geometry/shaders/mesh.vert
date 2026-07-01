@@ -10,19 +10,14 @@ uniform vec3 acceleration;
 uniform float time;
 #endif
 
-#ifdef USE_INSTANCE_TRANSLATIONS
-in vec3 instance_translation;
-#endif
-
 #ifdef USE_INSTANCE_TRANSFORMS
+uniform mat4 animationTransform;
 in vec4 row1;
 in vec4 row2;
 in vec4 row3;
 #endif
 
-#ifdef USE_POSITIONS
 out vec3 pos;
-#endif
 
 #ifdef USE_NORMALS 
 uniform mat4 normalMatrix;
@@ -43,7 +38,6 @@ out vec3 bitang;
 in vec3 tex_transform_row1;
 in vec3 tex_transform_row2;
 #endif
-uniform mat3 textureTransform;
 in vec2 uv_coordinates;
 out vec2 uvs;
 #endif
@@ -54,9 +48,9 @@ in vec4 color;
 #ifdef USE_INSTANCE_COLORS
 in vec4 instance_color;
 #endif
-#ifdef USE_COLORS 
+
 out vec4 col;
-#endif
+flat out int instance_id;
 
 void main()
 {
@@ -69,22 +63,18 @@ void main()
     transform[1] = vec4(row1.y, row2.y, row3.y, 0.0);
     transform[2] = vec4(row1.z, row2.z, row3.z, 0.0);
     transform[3] = vec4(row1.w, row2.w, row3.w, 1.0);
-    local2World *= transform;
+    local2World = local2World * transform * animationTransform;
+#endif
+
+#ifdef PARTICLES
+    mat4 animationTransform = mat4(1.0);
+    animationTransform[3].xyz = start_position + start_velocity * time + 0.5 * acceleration * time * time;
+    local2World = local2World * animationTransform;
 #endif
 
     vec4 worldPosition = local2World * vec4(position, 1.);
-    worldPosition.xyz /= worldPosition.w;
-#ifdef PARTICLES
-    worldPosition.xyz += start_position + start_velocity * time + 0.5 * acceleration * time * time;
-#endif
-#ifdef USE_INSTANCE_TRANSLATIONS 
-    worldPosition.xyz += instance_translation;
-#endif
     gl_Position = viewProjection * worldPosition;
-
-#ifdef USE_POSITIONS
-    pos = worldPosition.xyz;
-#endif
+    pos = worldPosition.xyz / worldPosition.w;
 
     // *** NORMAL ***
 #ifdef USE_NORMALS 
@@ -104,25 +94,24 @@ void main()
 
     // *** UV ***
 #ifdef USE_UVS 
-    mat3 texTransform = textureTransform;
 #ifdef USE_INSTANCE_TEXTURE_TRANSFORMATION
-    mat3 instancedTexTransform;
-    instancedTexTransform[0] = vec3(tex_transform_row1.x, tex_transform_row2.x, 0.0);
-    instancedTexTransform[1] = vec3(tex_transform_row1.y, tex_transform_row2.y, 0.0);
-    instancedTexTransform[2] = vec3(tex_transform_row1.z, tex_transform_row2.z, 1.0);
-    texTransform *= instancedTexTransform;
-#endif
+    mat3 texTransform;
+    texTransform[0] = vec3(tex_transform_row1.x, tex_transform_row2.x, 0.0);
+    texTransform[1] = vec3(tex_transform_row1.y, tex_transform_row2.y, 0.0);
+    texTransform[2] = vec3(tex_transform_row1.z, tex_transform_row2.z, 1.0);
     uvs = (texTransform * vec3(uv_coordinates, 1.0)).xy;
+#else
+    uvs = uv_coordinates;
+#endif
 #endif
 
     // *** COLOR ***
-#ifdef USE_COLORS
-    col = vec4(1.0, 1.0, 1.0, 1.0);
+    col = vec4(1.0);
 #ifdef USE_VERTEX_COLORS 
-    col *= color / 255.0;
+    col *= color;
 #endif
 #ifdef USE_INSTANCE_COLORS
-    col *= instance_color / 255.0;
+    col *= instance_color;
 #endif
-#endif
+    instance_id = gl_InstanceID;
 }

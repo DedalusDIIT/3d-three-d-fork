@@ -2,13 +2,13 @@
 //! A collection of controls for example to control the camera.
 //!
 
-mod camera_control;
-#[doc(inline)]
-pub use camera_control::*;
-
 mod orbit_control;
 #[doc(inline)]
 pub use orbit_control::*;
+
+mod free_orbit_control;
+#[doc(inline)]
+pub use free_orbit_control::*;
 
 mod first_person_control;
 #[doc(inline)]
@@ -17,6 +17,14 @@ pub use first_person_control::*;
 mod fly_control;
 #[doc(inline)]
 pub use fly_control::*;
+
+mod control2d;
+#[doc(inline)]
+pub use control2d::*;
+
+pub use three_d_asset::PixelPoint as PhysicalPoint;
+
+use three_d_asset::prelude::*;
 
 /// Type of mouse button.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
@@ -36,10 +44,8 @@ pub enum Event {
     MousePress {
         /// Type of button
         button: MouseButton,
-        /// The screen position in logical pixels, to get it in physical pixels, multiply it with the device pixel ratio.
-        /// The first value defines the position on the horizontal axis with zero being at the left border of the window
-        /// and the second on the vertical axis with zero being at the top edge of the window.
-        position: (f64, f64),
+        /// The screen position in physical pixels.
+        position: PhysicalPoint,
         /// The state of modifiers.
         modifiers: Modifiers,
         /// Whether or not this event already have been handled.
@@ -49,10 +55,8 @@ pub enum Event {
     MouseRelease {
         /// Type of button
         button: MouseButton,
-        /// The screen position in logical pixels, to get it in physical pixels, multiply it with the device pixel ratio.
-        /// The first value defines the position on the horizontal axis with zero being at the left border of the window
-        /// and the second on the vertical axis with zero being at the top edge of the window.
-        position: (f64, f64),
+        /// The screen position in physical pixels.
+        position: PhysicalPoint,
         /// The state of modifiers.
         modifiers: Modifiers,
         /// Whether or not this event already have been handled.
@@ -62,12 +66,10 @@ pub enum Event {
     MouseMotion {
         /// Type of button if a button is pressed.
         button: Option<MouseButton>,
-        /// The relative movement of the mouse/finger since last [Event::MouseMotion] event.
-        delta: (f64, f64),
-        /// The screen position in logical pixels, to get it in physical pixels, multiply it with the device pixel ratio.
-        /// The first value defines the position on the horizontal axis with zero being at the left border of the window
-        /// and the second on the vertical axis with zero being at the top edge of the window.
-        position: (f64, f64),
+        /// The relative movement of the mouse/finger since last [Event::MouseMotion] event in logical pixels.
+        delta: (f32, f32),
+        /// The screen position in physical pixels.
+        position: PhysicalPoint,
         /// The state of modifiers.
         modifiers: Modifiers,
         /// Whether or not this event already have been handled.
@@ -76,11 +78,31 @@ pub enum Event {
     /// Fired continuously when the mouse wheel or equivalent is applied.
     MouseWheel {
         /// The relative scrolling since the last [Event::MouseWheel] event.
-        delta: (f64, f64),
-        /// The screen position in logical pixels, to get it in physical pixels, multiply it with the device pixel ratio.
-        /// The first value defines the position on the horizontal axis with zero being at the left border of the window
-        /// and the second on the vertical axis with zero being at the top edge of the window.
-        position: (f64, f64),
+        delta: (f32, f32),
+        /// The screen position in physical pixels.
+        position: PhysicalPoint,
+        /// The state of modifiers.
+        modifiers: Modifiers,
+        /// Whether or not this event already have been handled.
+        handled: bool,
+    },
+    /// Fired continuously when a pinch input gesture is recognized, such as on a Mac trackpad
+    PinchGesture {
+        /// The relative pinching since the last [Event::PinchGesture] event (positive is zoom in).
+        delta: f32,
+        /// The screen position in physical pixels.
+        position: PhysicalPoint,
+        /// The state of modifiers.
+        modifiers: Modifiers,
+        /// Whether or not this event already have been handled.
+        handled: bool,
+    },
+    /// Fired continuously when a rotation input gesture is recognized, such as on a Mac trackpad
+    RotationGesture {
+        /// The relative rotation since the last [Event::RotationGesture] event (positive is counterclockwise).
+        delta: Radians,
+        /// The screen position in physical pixels.
+        position: PhysicalPoint,
         /// The state of modifiers.
         modifiers: Modifiers,
         /// Whether or not this event already have been handled.
@@ -138,6 +160,23 @@ pub enum Key {
     End,
     PageUp,
     PageDown,
+    /// Print Screen/SysRq.
+    Snapshot,
+
+    Mute,
+    VolumeDown,
+    VolumeUp,
+
+    Copy,
+    Paste,
+    Cut,
+
+    /// `=`
+    Equals,
+    /// `-`
+    Minus,
+    /// `+`
+    Plus,
 
     /// Either from the main row or from the numpad.
     Num0,
@@ -186,6 +225,58 @@ pub enum Key {
     X,
     Y,
     Z,
+
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+
+    /// `'`
+    Apostrophe,
+    /// `*`
+    Asterisk,
+    /// `\`
+    Backslash,
+    /// `^`
+    Caret,
+    /// `:`
+    Colon,
+    /// `,`
+    Comma,
+    /// `` ` ``
+    Grave,
+    /// `[`
+    LBracket,
+    /// `.`
+    Period,
+    /// `]`
+    RBracket,
+    /// `;`
+    Semicolon,
+    /// `/`
+    Slash,
+    /// `_`
+    Underline,
 }
 
 /// State of modifiers (alt, ctrl, shift and command).

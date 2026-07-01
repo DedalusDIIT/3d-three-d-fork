@@ -1,48 +1,78 @@
 use super::*;
-use crate::core::*;
 
 ///
 /// A control that makes the camera orbit around a target.
 ///
+#[derive(Clone, Copy, Debug)]
 pub struct OrbitControl {
-    control: CameraControl,
+    /// The target point to orbit around.
+    pub target: Vec3,
+    /// The minimum distance to the target point.
+    pub min_distance: f32,
+    /// The maximum distance to the target point.
+    pub max_distance: f32,
 }
 
 impl OrbitControl {
     /// Creates a new orbit control with the given target and minimum and maximum distance to the target.
     pub fn new(target: Vec3, min_distance: f32, max_distance: f32) -> Self {
         Self {
-            control: CameraControl {
-                left_drag_horizontal: CameraAction::OrbitLeft { target, speed: 0.5 },
-                left_drag_vertical: CameraAction::OrbitUp { target, speed: 0.5 },
-                scroll_vertical: CameraAction::Zoom {
-                    min: min_distance,
-                    max: max_distance,
-                    speed: 0.1,
-                    target,
-                },
-                ..Default::default()
-            },
+            target,
+            min_distance,
+            max_distance,
         }
     }
 
     /// Handles the events. Must be called each frame.
-    pub fn handle_events(&mut self, camera: &mut Camera, events: &mut [Event]) -> bool {
-        if let CameraAction::Zoom {
-            speed,
-            target,
-            min,
-            max,
-        } = &mut self.control.scroll_vertical
-        {
-            let x = target.distance(*camera.position());
-            *speed = 0.5 * smoothstep(*min, *max, x) + 0.001;
+    pub fn handle_events(
+        &mut self,
+        camera: &mut three_d_asset::Camera,
+        events: &mut [Event],
+    ) -> bool {
+        let mut change = false;
+        for event in events.iter_mut() {
+            match event {
+                Event::MouseMotion {
+                    delta,
+                    button,
+                    handled,
+                    ..
+                } if !*handled && Some(MouseButton::Left) == *button => {
+                    let speed = 0.01;
+                    camera.rotate_around_with_fixed_up(
+                        self.target,
+                        speed * delta.0,
+                        speed * delta.1,
+                    );
+                    *handled = true;
+                    change = true;
+                }
+                Event::MouseWheel { delta, handled, .. } if !*handled => {
+                    let distance = self.target.distance(camera.position());
+                    let zoom_amount = distance * (1.0 - (-delta.1 * 0.01).exp());
+                    camera.zoom_towards(
+                        self.target,
+                        zoom_amount,
+                        self.min_distance,
+                        self.max_distance,
+                    );
+                    *handled = true;
+                    change = true;
+                }
+                Event::PinchGesture { delta, handled, .. } if !*handled => {
+                    let speed = self.target.distance(camera.position()) + 0.1;
+                    camera.zoom_towards(
+                        self.target,
+                        speed * *delta,
+                        self.min_distance,
+                        self.max_distance,
+                    );
+                    *handled = true;
+                    change = true;
+                }
+                _ => {}
+            }
         }
-        self.control.handle_events(camera, events)
+        change
     }
-}
-
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0)).max(0.0).min(1.0);
-    t * t * (3.0 - 2.0 * t)
 }

@@ -21,9 +21,11 @@ impl Texture2DArray {
     /// Creates a new texture array from the given [CpuTexture]s.
     /// All of the cpu textures must contain data with the same [TextureDataType] and the same width and height.
     ///
+    /// **Note:** Mip maps will not be generated for RGB16F and RGB32F format, even if `mip_map_filter` is specified.
+    ///
     pub fn new(context: &Context, cpu_textures: &[&CpuTexture]) -> Self {
         let cpu_texture = cpu_textures
-            .get(0)
+            .first()
             .expect("Expect at least one texture in a texture array");
         match &cpu_texture.data {
             TextureData::RU8(_) => Self::new_with_data(
@@ -127,14 +129,14 @@ impl Texture2DArray {
         cpu_texture: &CpuTexture,
         data: &[&[T]],
     ) -> Self {
-        let mut texture = Self::new_empty::<T>(
+        let texture = Self::new_empty::<T>(
             context,
             cpu_texture.width,
             cpu_texture.height,
             data.len() as u32,
             cpu_texture.min_filter,
             cpu_texture.mag_filter,
-            cpu_texture.mip_map_filter,
+            cpu_texture.mipmap,
             cpu_texture.wrap_s,
             cpu_texture.wrap_t,
         );
@@ -145,6 +147,8 @@ impl Texture2DArray {
     ///
     /// Creates a new array of 2D textures.
     ///
+    /// **Note:** Mip maps will not be generated for RGB16F and RGB32F format, even if `mip_map_filter` is specified.
+    ///
     pub fn new_empty<T: TextureDataType>(
         context: &Context,
         width: u32,
@@ -152,71 +156,56 @@ impl Texture2DArray {
         depth: u32,
         min_filter: Interpolation,
         mag_filter: Interpolation,
-        mip_map_filter: Option<Interpolation>,
+        mipmap: Option<Mipmap>,
         wrap_s: Wrapping,
         wrap_t: Wrapping,
     ) -> Self {
-        let id = generate(context);
-        let number_of_mip_maps = calculate_number_of_mip_maps(mip_map_filter, width, height, None);
-        let texture = Self {
-            context: context.clone(),
-            id,
-            width,
-            height,
-            depth,
-            number_of_mip_maps,
-            data_byte_size: std::mem::size_of::<T>(),
-        };
-        texture.bind();
-        set_parameters(
-            context,
-            crate::context::TEXTURE_2D_ARRAY,
-            min_filter,
-            mag_filter,
-            if number_of_mip_maps == 1 {
-                None
-            } else {
-                mip_map_filter
-            },
-            wrap_s,
-            wrap_t,
-            None,
-        );
         unsafe {
-            context.tex_storage_3d(
-                crate::context::TEXTURE_2D_ARRAY,
-                number_of_mip_maps as i32,
-                T::internal_format(),
-                width as i32,
-                height as i32,
-                depth as i32,
-            );
+            Self::new_unchecked::<T>(
+                context,
+                width,
+                height,
+                depth,
+                min_filter,
+                mag_filter,
+                mipmap,
+                wrap_s,
+                wrap_t,
+                |texture| {
+                    context.tex_storage_3d(
+                        crate::context::TEXTURE_2D_ARRAY,
+                        texture.number_of_mip_maps() as i32,
+                        T::internal_format(),
+                        width as i32,
+                        height as i32,
+                        depth as i32,
+                    )
+                },
+            )
         }
-        texture.generate_mip_maps();
-        texture
     }
 
     ///
-    /// Fills the texture array with the given pixel data.
+    /// Fills the texture array with the given pixel data and generate mip maps if specified at construction.
     ///
     /// # Panic
     /// Will panic if the data does not correspond to the width, height, depth and format specified at construction.
     /// It is therefore necessary to create a new texture if the texture size or format has changed.
     ///
-    pub fn fill<T: TextureDataType>(&mut self, data: &[&[T]]) {
+    pub fn fill<T: TextureDataType>(&self, data: &[&[T]]) {
         for (i, data) in data.iter().enumerate() {
             self.fill_layer(i as u32, data);
         }
     }
 
     ///
-    /// Fills the given layer in the texture array with the given pixel data.
+    /// Fills the given layer in the texture array with the given pixel data and generate mip maps if specified at construction.
     ///
     /// # Panic
     /// Will panic if the layer number is bigger than the number of layers or if the data does not correspond to the width, height and format specified at construction.
     /// It is therefore necessary to create a new texture if the texture size or format has changed.
     ///
-    pub fn fill_layer<T: TextureDataType>(&mut self, layer: u32, data: &[T]) {
+    pub fn fill_layer<T: TextureDataType>(&self, layer: u32, data: &[T]) {
         if layer >= self.depth {
             panic!(
                 "cannot fill the layer {} with data, since there are only {} layers in the texture array",
@@ -239,7 +228,7 @@ impl Texture2DArray {
                 1,
                 format_from_data_type::<T>(),
                 T::data_type(),
-                crate::context::PixelUnpackData::Slice(to_byte_slice(&data)),
+                crate::context::PixelUnpackData::Slice(Some(to_byte_slice(&data))),
             );
         }
         self.generate_mip_maps();
@@ -254,7 +243,7 @@ impl Texture2DArray {
     /// **Note:** [DepthTest] is disabled if not also writing to a depth texture.
     ///
     pub fn as_color_target<'a>(
-        &'a mut self,
+        &'a self,
         layers: &'a [u32],
         mip_level: Option<u32>,
     ) -> ColorTarget<'a> {
@@ -274,6 +263,11 @@ impl Texture2DArray {
     /// The number of layers.
     pub fn depth(&self) -> u32 {
         self.depth
+    }
+
+    /// The number of mip maps of this texture.
+    pub fn number_of_mip_maps(&self) -> u32 {
+        self.number_of_mip_maps
     }
 
     pub(in crate::core) fn generate_mip_maps(&self) {
@@ -303,6 +297,59 @@ impl Texture2DArray {
             self.context
                 .bind_texture(crate::context::TEXTURE_2D_ARRAY, Some(self.id));
         }
+    }
+
+    ///
+    /// Creates a new texture where it is up to the caller to allocate and transfer data to the GPU
+    /// using low-level context calls inside the callback.
+    /// This function binds the texture and sets the parameters before calling the callback and generates mip maps afterwards.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe and should only be used in special cases,
+    /// for example when you have an uncommon source of data or the data is in a special format like sRGB.
+    ///
+    pub unsafe fn new_unchecked<T: TextureDataType>(
+        context: &Context,
+        width: u32,
+        height: u32,
+        depth: u32,
+        min_filter: Interpolation,
+        mag_filter: Interpolation,
+        mipmap: Option<Mipmap>,
+        wrap_s: Wrapping,
+        wrap_t: Wrapping,
+        callback: impl FnOnce(&Self),
+    ) -> Self {
+        let id = generate(context);
+        let number_of_mip_maps = calculate_number_of_mip_maps::<T>(mipmap, width, height, None);
+        let texture = Self {
+            context: context.clone(),
+            id,
+            width,
+            height,
+            depth,
+            number_of_mip_maps,
+            data_byte_size: std::mem::size_of::<T>(),
+        };
+        texture.bind();
+        set_parameters(
+            context,
+            crate::context::TEXTURE_2D_ARRAY,
+            min_filter,
+            mag_filter,
+            if number_of_mip_maps == 1 {
+                None
+            } else {
+                mipmap
+            },
+            wrap_s,
+            wrap_t,
+            None,
+        );
+        callback(&texture);
+        texture.generate_mip_maps();
+        texture
     }
 }
 

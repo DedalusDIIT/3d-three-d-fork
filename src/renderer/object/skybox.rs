@@ -7,7 +7,7 @@ use std::sync::Arc;
 ///
 pub struct Skybox {
     context: Context,
-    vertex_buffer: VertexBuffer,
+    vertex_buffer: VertexBuffer<Vec3>,
     material: SkyboxMaterial,
 }
 
@@ -25,8 +25,26 @@ impl Skybox {
         front: &CpuTexture,
         back: &CpuTexture,
     ) -> Self {
-        let texture = TextureCubeMap::new(&context, right, left, top, bottom, front, back);
-        Self::new_with_texture(context, Arc::new(texture))
+        let convert = |cpu_texture: &CpuTexture| match &cpu_texture.data {
+            TextureData::RgbU8(_) | TextureData::RgbaU8(_) => {
+                let mut cpu_texture = cpu_texture.clone();
+                cpu_texture.data.to_linear_srgb();
+                Some(cpu_texture)
+            }
+            _ => None,
+        };
+        Self::new_with_texture(
+            context,
+            Arc::new(TextureCubeMap::new(
+                context,
+                convert(right).as_ref().unwrap_or(right),
+                convert(left).as_ref().unwrap_or(left),
+                convert(top).as_ref().unwrap_or(top),
+                convert(bottom).as_ref().unwrap_or(bottom),
+                convert(front).as_ref().unwrap_or(front),
+                convert(back).as_ref().unwrap_or(back),
+            )),
+        )
     }
 
     ///
@@ -34,10 +52,12 @@ impl Skybox {
     ///
     pub fn new_from_equirectangular(context: &Context, cpu_texture: &CpuTexture) -> Self {
         let texture = match cpu_texture.data {
-            TextureData::RgbaU8(_)
-            | TextureData::RgbU8(_)
-            | TextureData::RgU8(_)
-            | TextureData::RU8(_) => {
+            TextureData::RgbaU8(_) | TextureData::RgbU8(_) => {
+                let mut cpu_texture = cpu_texture.clone();
+                cpu_texture.data.to_linear_srgb();
+                TextureCubeMap::new_from_equirectangular::<u8>(context, &cpu_texture)
+            }
+            TextureData::RgU8(_) | TextureData::RU8(_) => {
                 TextureCubeMap::new_from_equirectangular::<u8>(context, cpu_texture)
             }
             TextureData::RgbaF16(_)
@@ -59,6 +79,7 @@ impl Skybox {
 
     ///
     /// Creates a new skybox with the given [TextureCubeMap].
+    /// The colors are assumed to be in linear sRGB (`RgbU8`), linear sRGB with an alpha channel (`RgbaU8`) or HDR color space.
     ///
     pub fn new_with_texture(context: &Context, texture: Arc<TextureCubeMap>) -> Self {
         let vertex_buffer = VertexBuffer::new_with_data(
@@ -128,6 +149,21 @@ impl<'a> IntoIterator for &'a Skybox {
 }
 
 impl Geometry for Skybox {
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
+        program.use_uniform("view", viewer.view());
+        program.use_uniform("projection", viewer.projection());
+        program.use_vertex_attribute("position", &self.vertex_buffer);
+        program.draw_arrays(render_states, viewer.viewport(), 36);
+    }
+
+    fn vertex_shader_source(&self) -> String {
+        include_str!("shaders/skybox.vert").to_owned()
+    }
+
+    fn id(&self) -> GeometryId {
+        GeometryId::Skybox
+    }
+
     fn aabb(&self) -> AxisAlignedBoundingBox {
         AxisAlignedBoundingBox::INFINITE
     }
@@ -135,54 +171,41 @@ impl Geometry for Skybox {
     fn render_with_material(
         &self,
         material: &dyn Material,
-        camera: &Camera,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
     ) {
-        let fragment_shader_source = material.fragment_shader_source(false, lights);
-        self.context
-            .program(
-                &include_str!("shaders/skybox.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights);
-                    program.use_uniform("view", camera.view());
-                    program.use_uniform("projection", camera.projection());
-                    program.use_vertex_attribute("position", &self.vertex_buffer);
-                    program.draw_arrays(material.render_states(), camera.viewport(), 36);
-                },
-            )
-            .expect("Failed compiling shader");
+        if let Err(e) = render_with_material(&self.context, viewer, &self, material, lights) {
+            panic!("{}", e.to_string());
+        }
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        let fragment_shader_source =
-            material.fragment_shader_source(lights, color_texture, depth_texture);
-        self.context
-            .program(
-                &include_str!("shaders/skybox.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights, color_texture, depth_texture);
-                    program.use_uniform("view", camera.view());
-                    program.use_uniform("projection", camera.projection());
-                    program.use_vertex_attribute("position", &self.vertex_buffer);
-                    program.draw_arrays(material.render_states(), camera.viewport(), 36);
-                },
-            )
-            .expect("Failed compiling shader");
+        if let Err(e) = render_with_effect(
+            &self.context,
+            viewer,
+            self,
+            material,
+            lights,
+            color_texture,
+            depth_texture,
+        ) {
+            panic!("{}", e.to_string());
+        }
     }
 }
 
 impl Object for Skybox {
-    fn render(&self, camera: &Camera, lights: &[&dyn Light]) {
-        self.render_with_material(&self.material, camera, lights)
+    fn render(&self, viewer: &dyn Viewer, lights: &[&dyn Light]) {
+        if let Err(e) = render_with_material(&self.context, viewer, self, &self.material, lights) {
+            panic!("{}", e.to_string());
+        }
     }
 
     fn material_type(&self) -> MaterialType {
