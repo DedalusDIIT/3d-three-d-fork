@@ -1,21 +1,30 @@
 use crate::core::*;
 use crate::renderer::*;
-use std::collections::HashMap;
+use std::sync::RwLock;
+
+use super::BaseMesh;
 
 ///
 /// Similar to [Mesh], except it is possible to render many instances of the same mesh efficiently.
 ///
 pub struct InstancedMesh {
     context: Context,
-    vertex_buffers: HashMap<String, VertexBuffer>,
-    instance_buffers: HashMap<String, InstanceBuffer>,
-    index_buffer: Option<ElementBuffer>,
-    aabb_local: AxisAlignedBoundingBox,
-    aabb: AxisAlignedBoundingBox,
+    base_mesh: BaseMesh,
+    transform: RwLock<(
+        InstanceBuffer<Vec4>,
+        InstanceBuffer<Vec4>,
+        InstanceBuffer<Vec4>,
+    )>,
+    indices: RwLock<Vec<usize>>,
+    tex_transform: RwLock<Option<(InstanceBuffer<Vec3>, InstanceBuffer<Vec3>)>>,
+    instance_color: RwLock<Option<InstanceBuffer<Vec4>>>,
+    last_camera_position: RwLock<Option<Vec3>>,
+    aabb: AxisAlignedBoundingBox, // The AABB for the base mesh without transformations applied
+    instance_aabb: AxisAlignedBoundingBox, // The AABB for all the instances without the local to world transformation applied
     transformation: Mat4,
-    instance_transforms: Vec<Mat4>,
-    instance_count: u32,
-    texture_transform: Mat3,
+    animation_transformation: Mat4,
+    animation: Option<Box<dyn Fn(f32) -> Mat4 + Send + Sync>>,
+    instances: Instances,
 }
 
 impl InstancedMesh {
@@ -25,20 +34,31 @@ impl InstancedMesh {
     /// The model is rendered in as many instances as there are attributes in [Instances] given as input.
     ///
     pub fn new(context: &Context, instances: &Instances, cpu_mesh: &CpuMesh) -> Self {
+        #[cfg(debug_assertions)]
+        instances.validate().expect("invalid instances");
+
         let aabb = cpu_mesh.compute_aabb();
         let mut instanced_mesh = Self {
             context: context.clone(),
-            index_buffer: super::index_buffer_from_mesh(context, cpu_mesh),
-            vertex_buffers: super::vertex_buffers_from_mesh(context, cpu_mesh),
-            instance_buffers: HashMap::new(),
+            base_mesh: BaseMesh::new(context, cpu_mesh),
+            transform: RwLock::new((
+                InstanceBuffer::<Vec4>::new(context),
+                InstanceBuffer::<Vec4>::new(context),
+                InstanceBuffer::<Vec4>::new(context),
+            )),
+            tex_transform: RwLock::new(None),
+            instance_color: RwLock::new(None),
+            last_camera_position: RwLock::new(None),
+            indices: RwLock::new((0..instances.transformations.len()).collect::<Vec<usize>>()),
             aabb,
-            aabb_local: aabb.clone(),
+            instance_aabb: AxisAlignedBoundingBox::INFINITE,
             transformation: Mat4::identity(),
-            instance_count: 0,
-            instance_transforms: Vec::new(),
-            texture_transform: Mat3::identity(),
+            animation_transformation: Mat4::identity(),
+            animation: None,
+            instances: instances.clone(),
         };
-        instanced_mesh.set_instances(instances);
+        instanced_mesh.update_instance_aabb();
+        instanced_mesh.update_instance_buffers();
         instanced_mesh
     }
 
@@ -51,39 +71,26 @@ impl InstancedMesh {
 
     ///
     /// Set the local to world transformation applied to all instances.
-    /// This is applied before the transform for each instance.
+    /// This transformation is applied last, ie. after the instance transformation defined in [Self::set_instances] and the animation transformation defined by [Self::set_animation].
     ///
     pub fn set_transformation(&mut self, transformation: Mat4) {
         self.transformation = transformation;
-        self.update_aabb();
+        *self.last_camera_position.write().unwrap() = None;
     }
 
     ///
-    /// Get the texture transform applied to the uv coordinates of all of the instances.
+    /// Specifies a function which takes a time parameter as input and returns a transformation that should be applied to this mesh at the given time.
+    /// To actually animate this instanced mesh, call [Geometry::animate] at each frame which in turn evaluates the animation function defined by this method.
+    /// This transformation is applied first, then the instance transformation defined in [Self::set_instances], then the local to world transformation defined by [Self::set_transformation].
     ///
-    pub fn texture_transform(&self) -> &Mat3 {
-        &self.texture_transform
-    }
-
-    ///
-    /// Set the texture transform applied to the uv coordinates of all of the model instances.
-    /// This is applied before the texture transform for each instance.
-    ///
-    pub fn set_texture_transform(&mut self, texture_transform: Mat3) {
-        self.texture_transform = texture_transform;
+    pub fn set_animation(&mut self, animation: impl Fn(f32) -> Mat4 + Send + Sync + 'static) {
+        self.animation = Some(Box::new(animation));
+        self.animate(0.0);
     }
 
     /// Returns the number of instances that is rendered.
     pub fn instance_count(&self) -> u32 {
-        self.instance_count
-    }
-
-    /// Use this if you only want to render instance 0 through to instance `instance_count`.
-    /// This is the same as changing the instances using `set_instances`, except that it is faster since it doesn't update any buffers.
-    /// `instance_count` will be set to the number of instances when they are defined by `set_instances`, so all instanced are rendered by default.
-    pub fn set_instance_count(&mut self, instance_count: u32) {
-        self.instance_count = instance_count.min(self.instance_transforms.len() as u32);
-        self.update_aabb();
+        self.instances.count()
     }
 
     ///
@@ -92,220 +99,77 @@ impl InstancedMesh {
     pub fn set_instances(&mut self, instances: &Instances) {
         #[cfg(debug_assertions)]
         instances.validate().expect("invalid instances");
-        self.instance_count = instances.count();
-        self.instance_buffers.clear();
-        self.instance_transforms = (0..self.instance_count as usize)
-            .map(|i| {
-                Mat4::from_translation(instances.translations[i])
-                    * instances
-                        .rotations
-                        .as_ref()
-                        .map(|r| Mat4::from(r[i]))
-                        .unwrap_or(Mat4::identity())
-                    * instances
-                        .scales
-                        .as_ref()
-                        .map(|s| Mat4::from_nonuniform_scale(s[i].x, s[i].y, s[i].z))
-                        .unwrap_or(Mat4::identity())
-            })
-            .collect::<Vec<_>>();
-
-        if instances.rotations.is_none() && instances.scales.is_none() {
-            self.instance_buffers.insert(
-                "instance_translation".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &instances.translations),
-            );
-        } else {
-            let mut row1 = Vec::new();
-            let mut row2 = Vec::new();
-            let mut row3 = Vec::new();
-            for geometry_transform in self.instance_transforms.iter() {
-                row1.push(vec4(
-                    geometry_transform.x.x,
-                    geometry_transform.y.x,
-                    geometry_transform.z.x,
-                    geometry_transform.w.x,
-                ));
-
-                row2.push(vec4(
-                    geometry_transform.x.y,
-                    geometry_transform.y.y,
-                    geometry_transform.z.y,
-                    geometry_transform.w.y,
-                ));
-
-                row3.push(vec4(
-                    geometry_transform.x.z,
-                    geometry_transform.y.z,
-                    geometry_transform.z.z,
-                    geometry_transform.w.z,
-                ));
-            }
-
-            self.instance_buffers.insert(
-                "row1".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &row1),
-            );
-            self.instance_buffers.insert(
-                "row2".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &row2),
-            );
-            self.instance_buffers.insert(
-                "row3".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &row3),
-            );
-        }
-
-        if let Some(texture_transforms) = &instances.texture_transforms {
-            let mut instance_tex_transform1 = Vec::new();
-            let mut instance_tex_transform2 = Vec::new();
-            for texture_transform in texture_transforms.iter() {
-                instance_tex_transform1.push(vec3(
-                    texture_transform.x.x,
-                    texture_transform.y.x,
-                    texture_transform.z.x,
-                ));
-                instance_tex_transform2.push(vec3(
-                    texture_transform.x.y,
-                    texture_transform.y.y,
-                    texture_transform.z.y,
-                ));
-            }
-            self.instance_buffers.insert(
-                "tex_transform_row1".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &instance_tex_transform1),
-            );
-            self.instance_buffers.insert(
-                "tex_transform_row2".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &instance_tex_transform2),
-            );
-        }
-        if let Some(instance_colors) = &instances.colors {
-            self.instance_buffers.insert(
-                "instance_color".to_string(),
-                InstanceBuffer::new_with_data(&self.context, &instance_colors),
-            );
-        }
-        self.update_aabb();
+        self.instances = instances.clone();
+        *self.indices.write().unwrap() =
+            (0..instances.transformations.len()).collect::<Vec<usize>>();
+        *self.last_camera_position.write().unwrap() = None;
+        self.update_instance_aabb();
+        self.update_instance_buffers();
     }
 
-    fn update_aabb(&mut self) {
+    fn update_instance_aabb(&mut self) {
         let mut aabb = AxisAlignedBoundingBox::EMPTY;
-        for i in 0..self.instance_count as usize {
-            let mut aabb2 = self.aabb_local.clone();
-            aabb2.transform(&(self.instance_transforms[i] * self.transformation));
-            aabb.expand_with_aabb(&aabb2);
+        for instance_transformation in &self.instances.transformations {
+            aabb.expand_with_aabb(
+                self.aabb
+                    .transformed(instance_transformation * self.animation_transformation),
+            );
         }
-        self.aabb = aabb;
+        self.instance_aabb = aabb;
     }
 
-    fn draw(&self, program: &Program, render_states: RenderStates, camera: &Camera) {
-        program.use_uniform("viewProjection", camera.projection() * camera.view());
-        program.use_uniform("modelMatrix", &self.transformation);
-        program.use_uniform_if_required("textureTransform", &self.texture_transform);
-        program.use_uniform_if_required(
-            "normalMatrix",
-            &self.transformation.invert().unwrap().transpose(),
+    ///
+    /// This function updates the instance buffers, so the instances are rendered in the order given by the indices
+    ///
+    fn update_instance_buffers(&self) {
+        let indices = self.indices.read().unwrap();
+        let mut row1 = Vec::new();
+        let mut row2 = Vec::new();
+        let mut row3 = Vec::new();
+        for transformation in indices.iter().map(|i| self.instances.transformations[*i]) {
+            row1.push(transformation.row(0));
+            row2.push(transformation.row(1));
+            row3.push(transformation.row(2));
+        }
+
+        *self.transform.write().unwrap() = (
+            InstanceBuffer::new_with_data(&self.context, &row1),
+            InstanceBuffer::new_with_data(&self.context, &row2),
+            InstanceBuffer::new_with_data(&self.context, &row3),
         );
 
-        for attribute_name in ["position", "normal", "tangent", "color", "uv_coordinates"] {
-            if program.requires_attribute(attribute_name) {
-                program.use_vertex_attribute(
-                    attribute_name,
-                    self.vertex_buffers
-                        .get(attribute_name).expect(&format!("the render call requires the {} vertex buffer which is missing on the given geometry", attribute_name))
-                );
-            }
-        }
-
-        for attribute_name in [
-            "instance_translation",
-            "row1",
-            "row2",
-            "row3",
-            "tex_transform_row1",
-            "tex_transform_row2",
-            "instance_color",
-        ] {
-            if program.requires_attribute(attribute_name) {
-                program.use_instance_attribute(
-                    attribute_name,
-                    self.instance_buffers
-                    .get(attribute_name).expect(&format!("the render call requires the {} instance buffer which is missing on the given geometry", attribute_name))
-                );
-            }
-        }
-
-        if let Some(ref index_buffer) = self.index_buffer {
-            program.draw_elements_instanced(
-                render_states,
-                camera.viewport(),
-                index_buffer,
-                self.instance_count,
-            )
-        } else {
-            program.draw_arrays_instanced(
-                render_states,
-                camera.viewport(),
-                self.vertex_buffers.get("position").unwrap().vertex_count() as u32,
-                self.instance_count,
-            )
-        }
-    }
-
-    fn vertex_shader_source(&self, fragment_shader_source: &str) -> String {
-        let use_positions = fragment_shader_source.find("in vec3 pos;").is_some();
-        let use_normals = fragment_shader_source.find("in vec3 nor;").is_some();
-        let use_tangents = fragment_shader_source.find("in vec3 tang;").is_some();
-        let use_uvs = fragment_shader_source.find("in vec2 uvs;").is_some();
-        let use_colors = fragment_shader_source.find("in vec4 col;").is_some();
-        format!(
-            "{}{}{}{}{}{}{}{}{}",
-            if self.instance_buffers.contains_key("instance_translation") {
-                "#define USE_INSTANCE_TRANSLATIONS\n"
-            } else {
-                "#define USE_INSTANCE_TRANSFORMS\n"
-            },
-            if use_positions {
-                "#define USE_POSITIONS\n"
-            } else {
-                ""
-            },
-            if use_normals {
-                "#define USE_NORMALS\n"
-            } else {
-                ""
-            },
-            if use_tangents {
-                if fragment_shader_source.find("in vec3 bitang;").is_none() {
-                    panic!("if the fragment shader defined 'in vec3 tang' it also needs to define 'in vec3 bitang'");
-                }
-                "#define USE_TANGENTS\n"
-            } else {
-                ""
-            },
-            if use_uvs { "#define USE_UVS\n" } else { "" },
-            if use_colors {
-                if self.instance_buffers.contains_key("instance_color")
-                    && self.vertex_buffers.contains_key("color")
-                {
-                    "#define USE_COLORS\n#define USE_VERTEX_COLORS\n#define USE_INSTANCE_COLORS\n"
-                } else if self.instance_buffers.contains_key("instance_color") {
-                    "#define USE_COLORS\n#define USE_INSTANCE_COLORS\n"
-                } else {
-                    "#define USE_COLORS\n#define USE_VERTEX_COLORS\n"
-                }
-            } else {
-                ""
-            },
-            if self.instance_buffers.contains_key("tex_transform_row1") {
-                "#define USE_INSTANCE_TEXTURE_TRANSFORMATION\n"
-            } else {
-                ""
-            },
-            include_str!("../../core/shared.frag"),
-            include_str!("shaders/mesh.vert"),
-        )
+        *self.tex_transform.write().unwrap() =
+            self.instances
+                .texture_transformations
+                .as_ref()
+                .map(|texture_transforms| {
+                    let mut instance_tex_transform1 = Vec::new();
+                    let mut instance_tex_transform2 = Vec::new();
+                    for texture_transform in indices.iter().map(|i| texture_transforms[*i]) {
+                        instance_tex_transform1.push(vec3(
+                            texture_transform.x.x,
+                            texture_transform.y.x,
+                            texture_transform.z.x,
+                        ));
+                        instance_tex_transform2.push(vec3(
+                            texture_transform.x.y,
+                            texture_transform.y.y,
+                            texture_transform.z.y,
+                        ));
+                    }
+                    (
+                        InstanceBuffer::new_with_data(&self.context, &instance_tex_transform1),
+                        InstanceBuffer::new_with_data(&self.context, &instance_tex_transform2),
+                    )
+                });
+        *self.instance_color.write().unwrap() =
+            self.instances.colors.as_ref().map(|instance_colors| {
+                let ordered_instance_colors = indices
+                    .iter()
+                    .map(|i| instance_colors[*i].to_linear_srgb())
+                    .collect::<Vec<_>>();
+                InstanceBuffer::new_with_data(&self.context, &ordered_instance_colors)
+            });
     }
 }
 
@@ -319,53 +183,132 @@ impl<'a> IntoIterator for &'a InstancedMesh {
 }
 
 impl Geometry for InstancedMesh {
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
+        // Check if we need a reorder the instance draw order. This only applies to transparent materials.
+        if render_states.blend != Blend::Disabled
+            && self
+                .last_camera_position
+                .read()
+                .unwrap()
+                .map(|p| p.distance2(viewer.position()) > 0.001)
+                .unwrap_or(true)
+        {
+            *self.last_camera_position.write().unwrap() = Some(viewer.position());
+            let distances = self
+                .instances
+                .transformations
+                .iter()
+                .map(|m| {
+                    (self.transformation * m * self.animation_transformation)
+                        .w
+                        .truncate()
+                        .distance2(viewer.position())
+                })
+                .collect::<Vec<_>>();
+            self.indices.write().unwrap().sort_by(|a, b| {
+                distances[*b]
+                    .partial_cmp(&distances[*a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            self.update_instance_buffers();
+        }
+
+        program.use_uniform("viewProjection", viewer.projection() * viewer.view());
+        program.use_uniform("animationTransform", self.animation_transformation);
+        program.use_uniform("modelMatrix", self.transformation);
+
+        let (row1, row2, row3) = &*self.transform.read().unwrap();
+        program.use_instance_attribute("row1", row1);
+        program.use_instance_attribute("row2", row2);
+        program.use_instance_attribute("row3", row3);
+
+        if program.requires_attribute("tex_transform_row1") {
+            if let Some((row1, row2)) = &*self.tex_transform.read().unwrap() {
+                program.use_instance_attribute("tex_transform_row1", row1);
+                program.use_instance_attribute("tex_transform_row2", row2);
+            }
+        }
+
+        if program.requires_attribute("instance_color") {
+            if let Some(color) = &*self.instance_color.read().unwrap() {
+                program.use_instance_attribute("instance_color", color);
+            }
+        }
+
+        self.base_mesh
+            .draw_instanced(program, render_states, viewer, self.instance_count());
+    }
+
+    fn vertex_shader_source(&self) -> String {
+        format!(
+            "#define USE_INSTANCE_TRANSFORMS\n{}{}{}",
+            if self.instance_color.read().unwrap().is_some() {
+                "#define USE_INSTANCE_COLORS\n"
+            } else {
+                ""
+            },
+            if self.tex_transform.read().unwrap().is_some() {
+                "#define USE_INSTANCE_TEXTURE_TRANSFORMATION\n"
+            } else {
+                ""
+            },
+            self.base_mesh.vertex_shader_source()
+        )
+    }
+
+    fn id(&self) -> GeometryId {
+        GeometryId::InstancedMesh(
+            self.base_mesh.normals.is_some(),
+            self.base_mesh.tangents.is_some(),
+            self.base_mesh.uvs.is_some(),
+            self.base_mesh.colors.is_some(),
+            self.instance_color.read().unwrap().is_some(),
+            self.tex_transform.read().unwrap().is_some(),
+        )
+    }
+
     fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.aabb
+        self.instance_aabb.transformed(self.transformation)
+    }
+
+    fn animate(&mut self, time: f32) {
+        if let Some(animation) = &self.animation {
+            self.animation_transformation = animation(time);
+            *self.last_camera_position.write().unwrap() = None;
+            self.update_instance_aabb();
+        }
     }
 
     fn render_with_material(
         &self,
         material: &dyn Material,
-        camera: &Camera,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
     ) {
-        let fragment_shader_source = material.fragment_shader_source(
-            self.vertex_buffers.contains_key("color")
-                || self.instance_buffers.contains_key("instance_color"),
-            lights,
-        );
-        self.context
-            .program(
-                &self.vertex_shader_source(&fragment_shader_source),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader")
+        if let Err(e) = render_with_material(&self.context, viewer, self, material, lights) {
+            panic!("{}", e.to_string());
+        }
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        let fragment_shader_source =
-            material.fragment_shader_source(lights, color_texture, depth_texture);
-        self.context
-            .program(
-                &self.vertex_shader_source(&fragment_shader_source),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights, color_texture, depth_texture);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader")
+        if let Err(e) = render_with_effect(
+            &self.context,
+            viewer,
+            self,
+            material,
+            lights,
+            color_texture,
+            depth_texture,
+        ) {
+            panic!("{}", e.to_string());
+        }
     }
 }
 
@@ -374,21 +317,17 @@ impl Geometry for InstancedMesh {
 ///
 /// Each list of attributes must contain the same number of elements as the number of instances.
 /// The attributes are applied to each instance before they are rendered.
-/// The translation, rotation and scale is applied after the transformation applied to all instances (see [InstancedMesh::set_transformation]).
-/// The texture transform is also applied after the texture transform applied to all instances (see [InstancedMesh::set_texture_transform]).
+/// The [Instances::transformations] are applied after the transformation applied to all instances (see [InstancedMesh::set_transformation]).
 ///
 #[derive(Clone, Debug, Default)]
 pub struct Instances {
-    /// The translation applied to the positions of each instance.
-    pub translations: Vec<Vec3>,
-    /// The rotations applied to the positions of each instance.
-    pub rotations: Option<Vec<Quat>>,
-    /// The non-uniform scales applied to the positions of each instance.
-    pub scales: Option<Vec<Vec3>>,
+    /// The transformations applied to each instance.
+    /// This transformation is applied in between the animation transformation defined by [InstancedMesh::set_animation] and the transformation defined in [InstancedMesh::set_transformation].
+    pub transformations: Vec<Mat4>,
     /// The texture transform applied to the uv coordinates of each instance.
-    pub texture_transforms: Option<Vec<Mat3>>,
+    pub texture_transformations: Option<Vec<Mat3>>,
     /// Colors multiplied onto the base color of each instance.
-    pub colors: Option<Vec<Color>>,
+    pub colors: Option<Vec<Srgba>>,
 }
 
 impl Instances {
@@ -411,27 +350,30 @@ impl Instances {
         };
 
         buffer_check(
-            self.texture_transforms.as_ref().map(|b| b.len()),
-            "texture transforms",
+            self.texture_transformations.as_ref().map(|b| b.len()),
+            "texture transformations",
         )?;
-        buffer_check(self.rotations.as_ref().map(|b| b.len()), "rotations")?;
-        buffer_check(self.scales.as_ref().map(|b| b.len()), "scales")?;
+        buffer_check(Some(self.transformations.len()), "transformations")?;
         buffer_check(self.colors.as_ref().map(|b| b.len()), "colors")?;
-        buffer_check(Some(self.translations.len()), "translations")?;
 
         Ok(())
     }
 
     /// Returns the number of instances.
     pub fn count(&self) -> u32 {
-        self.translations.len() as u32
+        self.transformations.len() as u32
     }
 }
 
 impl From<PointCloud> for Instances {
     fn from(points: PointCloud) -> Self {
         Self {
-            translations: points.positions.to_f32(),
+            transformations: points
+                .positions
+                .to_f32()
+                .into_iter()
+                .map(Mat4::from_translation)
+                .collect(),
             colors: points.colors,
             ..Default::default()
         }

@@ -10,7 +10,6 @@ use three_d::*;
 pub async fn run() {
     let window = Window::new(WindowSettings {
         title: "PBR!".to_string(),
-        min_size: (512, 512),
         max_size: Some((1280, 720)),
         ..Default::default()
     })
@@ -26,7 +25,7 @@ pub async fn run() {
         0.1,
         1000.0,
     );
-    let mut control = OrbitControl::new(*camera.target(), 1.0, 100.0);
+    let mut control = OrbitControl::new(camera.target(), 1.0, 100.0);
     let mut gui = three_d::GUI::new(&context);
 
     let mut loaded = if let Ok(loaded) = three_d_asset::io::load_async(&[
@@ -57,7 +56,9 @@ pub async fn run() {
         .unwrap()
         .remove(0);
 
-    let light = AmbientLight::new_with_environment(&context, 1.0, Color::WHITE, skybox.texture());
+    let wireframes = Wireframe::new_from_cpu_model(&context, &cpu_model, 1.0, Srgba::RED);
+
+    let light = AmbientLight::new_with_environment(&context, 1.0, Srgba::WHITE, skybox.texture());
 
     // main loop
     let mut normal_map_enabled = true;
@@ -65,6 +66,7 @@ pub async fn run() {
     let mut metallic_roughness_enabled = true;
     let mut albedo_map_enabled = true;
     let mut emissive_map_enabled = true;
+    let mut wireframe_enabled = false;
     window.render_loop(move |mut frame_input| {
         let mut panel_width = 0.0;
         gui.update(
@@ -72,17 +74,18 @@ pub async fn run() {
             frame_input.accumulated_time,
             frame_input.viewport,
             frame_input.device_pixel_ratio,
-            |gui_context| {
+            |ui| {
                 use three_d::egui::*;
-                SidePanel::left("side_panel").show(gui_context, |ui| {
+                Panel::left("side_panel").show_inside(ui, |ui| {
                     ui.heading("Debug Panel");
                     ui.checkbox(&mut albedo_map_enabled, "Albedo map");
                     ui.checkbox(&mut metallic_roughness_enabled, "Metallic roughness map");
                     ui.checkbox(&mut normal_map_enabled, "Normal map");
                     ui.checkbox(&mut occlusion_map_enabled, "Occlusion map");
                     ui.checkbox(&mut emissive_map_enabled, "Emissive map");
+                    ui.checkbox(&mut wireframe_enabled, "Wireframe")
                 });
-                panel_width = gui_context.used_rect().width() as f64;
+                panel_width = frame_input.window_width as f32 - ui.available_width();
             },
         );
 
@@ -131,7 +134,7 @@ pub async fn run() {
                     emissive: if emissive_map_enabled {
                         model.material.emissive
                     } else {
-                        Color::BLACK
+                        Srgba::BLACK
                     },
                     emissive_texture: if emissive_map_enabled {
                         model.material.emissive_texture.clone()
@@ -146,8 +149,13 @@ pub async fn run() {
                     ),
                 };
                 model.render_with_material(&material, &camera, &[&light]);
-                gui.render();
-            });
+                gui.render()
+            })
+            .unwrap();
+
+        if wireframe_enabled {
+            frame_input.screen().render(&camera, &wireframes, &[&light]);
+        }
 
         FrameOutput::default()
     });

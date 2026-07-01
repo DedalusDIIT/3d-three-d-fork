@@ -5,7 +5,7 @@
 ///
 /// A set of render specific states that has to be specified at each render call.
 ///
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct RenderStates {
     ///
     /// Defines which channels (red, green, blue, alpha and depth) to write to in a render call.
@@ -33,23 +33,13 @@ pub struct RenderStates {
     pub cull: Cull,
 }
 
-impl Default for RenderStates {
-    fn default() -> Self {
-        Self {
-            write_mask: WriteMask::default(),
-            depth_test: DepthTest::default(),
-            blend: Blend::default(),
-            cull: Cull::default(),
-        }
-    }
-}
-
 ///
 /// Defines whether the triangles that are backfacing, frontfacing, both or none should be rendered in a render call.
 ///
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum Cull {
     /// Render both front- and backfacing triangles.
+    #[default]
     None,
     /// Render only frontfacing triangles.
     Back,
@@ -59,12 +49,6 @@ pub enum Cull {
     FrontAndBack,
 }
 
-impl Default for Cull {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
 ///
 /// Determines whether or not a fragment/pixel from the current render call should be discarded
 /// when comparing its depth with the depth of the current fragment/pixel.
@@ -72,9 +56,10 @@ impl Default for Cull {
 /// **Note:** Depth test is disabled if the render call is not writing to a depth texture.
 ///
 #[allow(missing_docs)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum DepthTest {
     Never,
+    #[default]
     Less,
     Equal,
     LessOrEqual,
@@ -82,12 +67,6 @@ pub enum DepthTest {
     NotEqual,
     GreaterOrEqual,
     Always,
-}
-
-impl Default for DepthTest {
-    fn default() -> Self {
-        Self::Less
-    }
 }
 
 ///
@@ -162,7 +141,7 @@ impl Default for WriteMask {
 /// This is usually used to simulate transparency.
 ///
 #[allow(missing_docs)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum Blend {
     Enabled {
         source_rgb_multiplier: BlendMultiplierType,
@@ -172,6 +151,7 @@ pub enum Blend {
         rgb_equation: BlendEquationType,
         alpha_equation: BlendEquationType,
     },
+    #[default]
     Disabled,
 }
 
@@ -212,12 +192,6 @@ impl Blend {
         rgb_equation: BlendEquationType::Add,
         alpha_equation: BlendEquationType::Add,
     };
-}
-
-impl Default for Blend {
-    fn default() -> Self {
-        Self::Disabled
-    }
 }
 
 ///

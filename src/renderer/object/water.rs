@@ -131,11 +131,11 @@ impl<M: Material> Water<M> {
     ///
     /// For updating the animation. The time parameter should be some continious time, for example the time since start.
     ///
-    pub fn update_animation(&mut self, time: f64) {
-        self.patches.iter_mut().for_each(|m| m.time = time);
+    pub fn animate(&mut self, time: f32) {
+        self.patches.iter_mut().for_each(|m| m.animate(time));
     }
 
-    fn indices(context: &Context) -> Arc<ElementBuffer> {
+    fn indices(context: &Context) -> Arc<ElementBuffer<u32>> {
         let mut indices: Vec<u32> = Vec::new();
         let stride = VERTICES_PER_SIDE as u32;
         let max = stride - 1;
@@ -152,14 +152,14 @@ impl<M: Material> Water<M> {
         Arc::new(ElementBuffer::new_with_data(context, &indices))
     }
 
-    fn positions(context: &Context, vertex_distance: f32) -> Arc<VertexBuffer> {
-        let mut data = vec![vec3(0.0, 0.0, 0.0); (VERTICES_PER_SIDE * VERTICES_PER_SIDE) as usize];
+    fn positions(context: &Context, vertex_distance: f32) -> Arc<VertexBuffer<Vec3>> {
+        let mut data = vec![vec3(0.0, 0.0, 0.0); VERTICES_PER_SIDE * VERTICES_PER_SIDE];
         for r in 0..VERTICES_PER_SIDE {
             for c in 0..VERTICES_PER_SIDE {
                 let vertex_id = r * VERTICES_PER_SIDE + c;
                 let x = r as f32 * vertex_distance;
                 let z = c as f32 * vertex_distance;
-                data[vertex_id as usize] = vec3(x, 0.0, z);
+                data[vertex_id] = vec3(x, 0.0, z);
             }
         }
         Arc::new(VertexBuffer::new_with_data(context, &data))
@@ -181,13 +181,13 @@ impl<'a, M: Material> IntoIterator for &'a Water<M> {
 
 struct WaterPatch {
     context: Context,
-    time: f64,
+    time: f32,
     center: Vec3,
     parameters: [WaveParameters; MAX_WAVE_COUNT],
     offset: Vec2,
     size: Vec2,
-    position_buffer: Arc<VertexBuffer>,
-    index_buffer: Arc<ElementBuffer>,
+    position_buffer: Arc<VertexBuffer<Vec3>>,
+    index_buffer: Arc<ElementBuffer<u32>>,
 }
 
 impl WaterPatch {
@@ -195,8 +195,8 @@ impl WaterPatch {
         context: &Context,
         offset: Vec2,
         size: Vec2,
-        position_buffer: Arc<VertexBuffer>,
-        index_buffer: Arc<ElementBuffer>,
+        position_buffer: Arc<VertexBuffer<Vec3>>,
+        index_buffer: Arc<ElementBuffer<u32>>,
     ) -> Self {
         Self {
             context: context.clone(),
@@ -209,14 +209,16 @@ impl WaterPatch {
             index_buffer,
         }
     }
+}
 
-    fn draw(&self, program: &Program, render_states: RenderStates, camera: &Camera) {
+impl Geometry for WaterPatch {
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
         program.use_uniform(
             "offset",
-            &self.center + vec3(self.offset.x, 0.0, self.offset.y),
+            self.center + vec3(self.offset.x, 0.0, self.offset.y),
         );
-        program.use_uniform("viewProjection", camera.projection() * camera.view());
-        program.use_uniform("time", &(self.time as f32 * 0.001));
+        program.use_uniform("viewProjection", viewer.projection() * viewer.view());
+        program.use_uniform("time", self.time * 0.001);
         program.use_uniform_array(
             "waveParameters",
             &self
@@ -235,50 +237,47 @@ impl WaterPatch {
         );
 
         program.use_vertex_attribute("position", &self.position_buffer);
-        program.draw_elements(render_states, camera.viewport(), &self.index_buffer);
+        program.draw_elements(render_states, viewer.viewport(), &self.index_buffer);
     }
-}
 
-impl Geometry for WaterPatch {
+    fn vertex_shader_source(&self) -> String {
+        include_str!("shaders/water.vert").to_owned()
+    }
+
+    fn id(&self) -> GeometryId {
+        GeometryId::WaterPatch
+    }
+
     fn render_with_material(
         &self,
         material: &dyn Material,
-        camera: &Camera,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
     ) {
-        let fragment_shader_source = material.fragment_shader_source(false, lights);
-        self.context
-            .program(
-                &include_str!("shaders/water.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .unwrap();
+        if let Err(e) = render_with_material(&self.context, viewer, &self, material, lights) {
+            panic!("{}", e.to_string());
+        }
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        let fragment_shader_source =
-            material.fragment_shader_source(lights, color_texture, depth_texture);
-        self.context
-            .program(
-                &include_str!("shaders/water.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights, color_texture, depth_texture);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .unwrap();
+        if let Err(e) = render_with_effect(
+            &self.context,
+            viewer,
+            self,
+            material,
+            lights,
+            color_texture,
+            depth_texture,
+        ) {
+            panic!("{}", e.to_string());
+        }
     }
 
     fn aabb(&self) -> AxisAlignedBoundingBox {
@@ -292,5 +291,9 @@ impl Geometry for WaterPatch {
             self.center + vec3(self.offset.x, -m, self.offset.y),
             self.center + vec3(self.offset.x + self.size.x, m, self.offset.y + self.size.y),
         ])
+    }
+
+    fn animate(&mut self, time: f32) {
+        self.time = time;
     }
 }

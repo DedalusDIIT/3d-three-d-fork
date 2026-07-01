@@ -19,11 +19,10 @@ impl<T: UniformDataType + PrimitiveDataType> UniformDataType for Vector2<T> {}
 impl<T: UniformDataType + PrimitiveDataType> UniformDataType for Vector3<T> {}
 impl<T: UniformDataType + PrimitiveDataType> UniformDataType for Vector4<T> {}
 
-impl UniformDataType for Color {}
 impl UniformDataType for Quat {}
 
 impl<T: UniformDataType + PrimitiveDataType> UniformDataType for Matrix2<T> {}
 impl<T: UniformDataType + PrimitiveDataType> UniformDataType for Matrix3<T> {}
 impl<T: UniformDataType + PrimitiveDataType> UniformDataType for Matrix4<T> {}
 
-impl<T: UniformDataType + ?Sized> UniformDataType for &T {}
+impl<T: UniformDataType> UniformDataType for &T {}

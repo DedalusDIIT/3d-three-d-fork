@@ -1,6 +1,5 @@
 use crate::core::*;
 use crate::renderer::*;
-use std::sync::Arc;
 
 ///
 /// Render the object with colors that reflect its normals which primarily is used for debug purposes.
@@ -12,7 +11,7 @@ pub struct NormalMaterial {
     /// A scalar multiplier applied to each normal vector of the [Self::normal_texture].
     pub normal_scale: f32,
     /// A tangent space normal map, also known as bump map.
-    pub normal_texture: Option<Arc<Texture2D>>,
+    pub normal_texture: Option<Texture2DRef>,
     /// Render states.
     pub render_states: RenderStates,
 }
@@ -20,14 +19,13 @@ pub struct NormalMaterial {
 impl NormalMaterial {
     /// Constructs a new normal material from a [CpuMaterial] where only relevant information is used.
     pub fn new(context: &Context, cpu_material: &CpuMaterial) -> Self {
-        let normal_texture = if let Some(ref cpu_texture) = cpu_material.normal_texture {
-            Some(Arc::new(Texture2D::new(&context, cpu_texture)))
-        } else {
-            None
-        };
+        let normal_texture = cpu_material
+            .normal_texture
+            .as_ref()
+            .map(|cpu_texture| Texture2DRef::from_cpu_texture(context, cpu_texture));
         Self {
             normal_scale: cpu_material.normal_scale,
-            normal_texture: normal_texture,
+            normal_texture,
             render_states: RenderStates::default(),
         }
     }
@@ -53,17 +51,23 @@ impl FromCpuMaterial for NormalMaterial {
 }
 
 impl Material for NormalMaterial {
-    fn fragment_shader_source(&self, _use_vertex_colors: bool, _lights: &[&dyn Light]) -> String {
-        let mut shader = String::new();
-        if self.normal_texture.is_some() {
-            shader.push_str("#define USE_TEXTURE\nin vec2 uvs;\nin vec3 tang;\nin vec3 bitang;\n");
-        }
-        shader.push_str(include_str!("shaders/normal_material.frag"));
-        shader
+    fn id(&self) -> EffectMaterialId {
+        EffectMaterialId::NormalMaterial(self.normal_texture.is_some())
     }
-    fn use_uniforms(&self, program: &Program, _camera: &Camera, _lights: &[&dyn Light]) {
+
+    fn fragment_shader_source(&self, _lights: &[&dyn Light]) -> String {
+        let mut source = String::new();
+        if self.normal_texture.is_some() {
+            source.push_str("#define USE_TEXTURE\nin vec2 uvs;\nin vec3 tang;\nin vec3 bitang;\n");
+        }
+        source.push_str(include_str!("shaders/normal_material.frag"));
+        source
+    }
+
+    fn use_uniforms(&self, program: &Program, _viewer: &dyn Viewer, _lights: &[&dyn Light]) {
         if let Some(ref tex) = self.normal_texture {
-            program.use_uniform("normalScale", &self.normal_scale);
+            program.use_uniform("normalScale", self.normal_scale);
+            program.use_uniform("textureTransformation", tex.transformation);
             program.use_texture("normalTexture", tex);
         }
     }

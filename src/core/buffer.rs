@@ -2,6 +2,8 @@
 //! Different types of buffers used for sending data (primarily geometry data) to the GPU.
 //!
 mod element_buffer;
+use std::marker::PhantomData;
+
 #[doc(inline)]
 pub use element_buffer::*;
 
@@ -38,39 +40,34 @@ impl<T: BufferDataType + PrimitiveDataType> BufferDataType for [T; 2] {}
 impl<T: BufferDataType + PrimitiveDataType> BufferDataType for [T; 3] {}
 impl<T: BufferDataType + PrimitiveDataType> BufferDataType for [T; 4] {}
 
-impl BufferDataType for Color {}
 impl BufferDataType for Quat {}
 
-impl<T: BufferDataType + ?Sized> BufferDataType for &T {}
-
-struct Buffer {
+struct Buffer<T: BufferDataType> {
     context: Context,
     id: crate::context::Buffer,
     attribute_count: u32,
-    data_type: u32,
-    data_size: u32,
+    _d: PhantomData<T>,
 }
 
-impl Buffer {
+impl<T: BufferDataType> Buffer<T> {
     pub fn new(context: &Context) -> Self {
         Self {
             context: context.clone(),
             id: unsafe { context.create_buffer().expect("Failed creating buffer") },
             attribute_count: 0,
-            data_type: 0,
-            data_size: 0,
+            _d: PhantomData,
         }
     }
 
-    pub fn new_with_data<T: BufferDataType>(context: &Context, data: &[T]) -> Self {
+    pub fn new_with_data(context: &Context, data: &[T]) -> Self {
         let mut buffer = Self::new(context);
-        if data.len() > 0 {
+        if !data.is_empty() {
             buffer.fill(data);
         }
         buffer
     }
 
-    pub fn fill<T: BufferDataType>(&mut self, data: &[T]) {
+    pub fn fill(&mut self, data: &[T]) {
         self.bind();
         unsafe {
             self.context.buffer_data_u8_slice(
@@ -85,8 +82,19 @@ impl Buffer {
             self.context.bind_buffer(crate::context::ARRAY_BUFFER, None);
         }
         self.attribute_count = data.len() as u32;
-        self.data_type = T::data_type();
-        self.data_size = T::size();
+    }
+
+    pub fn fill_subset(&mut self, offset: u32, data: &[T]) {
+        self.bind();
+        unsafe {
+            self.context.buffer_sub_data_u8_slice(
+                crate::context::ARRAY_BUFFER,
+                offset as i32,
+                to_byte_slice(data),
+            );
+            self.context.bind_buffer(crate::context::ARRAY_BUFFER, None);
+        }
+        self.attribute_count = (offset + data.len() as u32).max(self.attribute_count);
     }
 
     pub fn attribute_count(&self) -> u32 {
@@ -101,7 +109,7 @@ impl Buffer {
     }
 }
 
-impl Drop for Buffer {
+impl<T: BufferDataType> Drop for Buffer<T> {
     fn drop(&mut self) {
         unsafe {
             self.context.delete_buffer(self.id);

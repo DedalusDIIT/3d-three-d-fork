@@ -13,6 +13,8 @@ in vec3 position;
 out vec2 uvs;
 out vec3 nor;
 out vec3 pos;
+out vec4 col;
+flat out int instance_id;
 
 void main()
 {
@@ -52,4 +54,6 @@ void main()
     
     gl_Position = viewProjection * vec4(pos, 1.);
     uvs = pos.xz;
+    col = vec4(1.0);
+    instance_id = gl_InstanceID;
 }

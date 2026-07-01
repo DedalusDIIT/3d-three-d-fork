@@ -21,9 +21,9 @@ pub struct Terrain<M: Material> {
     context: Context,
     center: (i32, i32),
     patches: Vec<Gm<TerrainPatch, M>>,
-    index_buffer1: Arc<ElementBuffer>,
-    index_buffer4: Arc<ElementBuffer>,
-    index_buffer16: Arc<ElementBuffer>,
+    index_buffer1: Arc<ElementBuffer<u32>>,
+    index_buffer4: Arc<ElementBuffer<u32>>,
+    index_buffer16: Arc<ElementBuffer<u32>>,
     material: M,
     lod: Arc<dyn Fn(f32) -> Lod + Send + Sync>,
     height_map: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>,
@@ -67,7 +67,7 @@ impl<M: Material + Clone> Terrain<M> {
             index_buffer4: Self::indices(context, 4),
             index_buffer16: Self::indices(context, 16),
             lod: Arc::new(|_| Lod::High),
-            material: material.clone(),
+            material,
             height_map,
             side_length,
             vertex_distance,
@@ -183,7 +183,7 @@ impl<M: Material + Clone> Terrain<M> {
         })
     }
 
-    fn indices(context: &Context, resolution: u32) -> Arc<ElementBuffer> {
+    fn indices(context: &Context, resolution: u32) -> Arc<ElementBuffer<u32>> {
         let mut indices: Vec<u32> = Vec::new();
         let stride = VERTICES_PER_SIDE as u32;
         let max = (stride - 1) / resolution;
@@ -235,11 +235,11 @@ fn pos2patch(vertex_distance: f32, position: Vec2) -> (i32, i32) {
 struct TerrainPatch {
     context: Context,
     index: (i32, i32),
-    positions_buffer: VertexBuffer,
-    normals_buffer: VertexBuffer,
+    positions_buffer: VertexBuffer<Vec3>,
+    normals_buffer: VertexBuffer<Vec3>,
     center: Vec2,
     aabb: AxisAlignedBoundingBox,
-    pub index_buffer: Arc<ElementBuffer>,
+    pub index_buffer: Arc<ElementBuffer<u32>>,
 }
 
 impl TerrainPatch {
@@ -247,7 +247,7 @@ impl TerrainPatch {
         context: &Context,
         height_map: impl Fn(f32, f32) -> f32 + Clone,
         index: (i32, i32),
-        index_buffer: Arc<ElementBuffer>,
+        index_buffer: Arc<ElementBuffer<u32>>,
         vertex_distance: f32,
     ) -> Self {
         let patch_size = patch_size(vertex_distance);
@@ -297,7 +297,7 @@ impl TerrainPatch {
     fn normals(
         height_map: impl Fn(f32, f32) -> f32,
         offset: Vec2,
-        positions: &Vec<Vec3>,
+        positions: &[Vec3],
         vertex_distance: f32,
     ) -> Vec<Vec3> {
         let mut data = vec![vec3(0.0, 0.0, 0.0); VERTICES_PER_SIDE * VERTICES_PER_SIDE];
@@ -334,65 +334,56 @@ impl TerrainPatch {
         }
         data
     }
-
-    fn draw(&self, program: &Program, render_states: RenderStates, camera: &Camera) {
-        let transformation = Mat4::identity();
-        program.use_uniform("modelMatrix", &transformation);
-        program.use_uniform(
-            "viewProjectionMatrix",
-            &(camera.projection() * camera.view()),
-        );
-        program.use_uniform(
-            "normalMatrix",
-            &transformation.invert().unwrap().transpose(),
-        );
-
-        program.use_vertex_attribute("position", &self.positions_buffer);
-        program.use_vertex_attribute("normal", &self.normals_buffer);
-        program.draw_elements(render_states, camera.viewport(), &self.index_buffer);
-    }
 }
 
 impl Geometry for TerrainPatch {
+    fn vertex_shader_source(&self) -> String {
+        include_str!("shaders/terrain.vert").to_owned()
+    }
+
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
+        program.use_uniform("viewProjectionMatrix", viewer.projection() * viewer.view());
+        program.use_vertex_attribute("position", &self.positions_buffer);
+        if program.requires_attribute("normal") {
+            program.use_vertex_attribute("normal", &self.normals_buffer);
+        }
+        program.draw_elements(render_states, viewer.viewport(), &self.index_buffer);
+    }
+
+    fn id(&self) -> GeometryId {
+        GeometryId::TerrainPatch
+    }
+
     fn render_with_material(
         &self,
         material: &dyn Material,
-        camera: &Camera,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
     ) {
-        let fragment_shader_source = material.fragment_shader_source(false, lights);
-        self.context
-            .program(
-                &include_str!("shaders/terrain.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader");
+        if let Err(e) = render_with_material(&self.context, viewer, &self, material, lights) {
+            panic!("{}", e.to_string());
+        }
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        let fragment_shader_source =
-            material.fragment_shader_source(lights, color_texture, depth_texture);
-        self.context
-            .program(
-                &include_str!("shaders/terrain.vert"),
-                &fragment_shader_source,
-                |program| {
-                    material.use_uniforms(program, camera, lights, color_texture, depth_texture);
-                    self.draw(program, material.render_states(), camera);
-                },
-            )
-            .expect("Failed compiling shader");
+        if let Err(e) = render_with_effect(
+            &self.context,
+            viewer,
+            self,
+            material,
+            lights,
+            color_texture,
+            depth_texture,
+        ) {
+            panic!("{}", e.to_string());
+        }
     }
 
     fn aabb(&self) -> AxisAlignedBoundingBox {

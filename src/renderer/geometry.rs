@@ -1,8 +1,50 @@
+#![macro_use]
 //!
 //! A collection of geometries implementing the [Geometry] trait.
 //!
 //! A geometry together with a [material] can be rendered directly, or combined into an [object] (see [Gm]) that can be used in a render call, for example [RenderTarget::render].
 //!
+
+macro_rules! impl_geometry_body {
+    ($inner:ident) => {
+        fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
+            self.$inner().draw(viewer, program, render_states)
+        }
+
+        fn vertex_shader_source(&self) -> String {
+            self.$inner().vertex_shader_source()
+        }
+
+        fn id(&self) -> GeometryId {
+            self.$inner().id()
+        }
+
+        fn render_with_material(
+            &self,
+            material: &dyn Material,
+            viewer: &dyn Viewer,
+            lights: &[&dyn Light],
+        ) {
+            self.$inner().render_with_material(material, viewer, lights)
+        }
+
+        fn render_with_effect(
+            &self,
+            material: &dyn Effect,
+            viewer: &dyn Viewer,
+            lights: &[&dyn Light],
+            color_texture: Option<ColorTexture>,
+            depth_texture: Option<DepthTexture>,
+        ) {
+            self.$inner()
+                .render_with_effect(material, viewer, lights, color_texture, depth_texture)
+        }
+
+        fn aabb(&self) -> AxisAlignedBoundingBox {
+            self.$inner().aabb()
+        }
+    };
+}
 
 mod mesh;
 #[doc(inline)]
@@ -39,7 +81,10 @@ pub use circle::*;
 use crate::core::*;
 use crate::renderer::*;
 
-pub use three_d_asset::{Indices, PointCloud, Positions, TriMesh as CpuMesh};
+pub use three_d_asset::{
+    Geometry as CpuGeometry, Indices, KeyFrameAnimation, KeyFrames, PointCloud, Positions,
+    TriMesh as CpuMesh,
+};
 
 ///
 /// Represents a 3D geometry that, together with a [material], can be rendered using [Geometry::render_with_material].
@@ -54,23 +99,49 @@ pub use three_d_asset::{Indices, PointCloud, Positions, TriMesh as CpuMesh};
 /// - uv coordinates: `out vec2 uvs;` (must be flipped in v compared to standard uv coordinates, ie. do `uvs = vec2(uvs.x, 1.0 - uvs.y);` in the vertex shader or do the flip before constructing the uv coordinates vertex buffer)
 /// - color: `out vec4 col;`
 ///
+/// In addition, for the geometry to be pickable using the [pick] or [ray_intersect] methods (ie. combined with the [IntersectionMaterial]),
+/// it needs to support `flat out int instance_id;`. Simply set it to the built-in glsl variable: `gl_InstanceID`.
+///
 pub trait Geometry {
+    ///
+    /// Draw this geometry.
+    ///
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates);
+
+    ///
+    /// Returns the vertex shader source for this geometry given that the fragment shader needs the given vertex attributes.
+    ///
+    fn vertex_shader_source(&self) -> String;
+
+    ///
+    /// Returns a unique ID for each variation of the shader source returned from `Geometry::vertex_shader_source`.
+    ///
+    /// **Note:** The last bit is reserved to internally implemented geometries, so if implementing the `Geometry` trait
+    /// outside of this crate, always return an id in the public use range as defined by [GeometryId].
+    ///
+    fn id(&self) -> GeometryId;
+
     ///
     /// Render the geometry with the given [Material].
     /// Must be called in the callback given as input to a [RenderTarget], [ColorTarget] or [DepthTarget] write method.
     /// Use an empty array for the `lights` argument, if the material does not require lights to be rendered.
     ///
-    fn render_with_material(&self, material: &dyn Material, camera: &Camera, lights: &[&dyn Light]);
+    fn render_with_material(
+        &self,
+        material: &dyn Material,
+        viewer: &dyn Viewer,
+        lights: &[&dyn Light],
+    );
 
     ///
-    /// Render the geometry with the given [PostMaterial].
+    /// Render the geometry with the given [Effect].
     /// Must be called in the callback given as input to a [RenderTarget], [ColorTarget] or [DepthTarget] write method.
     /// Use an empty array for the `lights` argument, if the material does not require lights to be rendered.
     ///
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
@@ -80,211 +151,82 @@ pub trait Geometry {
     /// Returns the [AxisAlignedBoundingBox] for this geometry in the global coordinate system.
     ///
     fn aabb(&self) -> AxisAlignedBoundingBox;
+
+    ///
+    /// For updating the animation of this geometry if it is animated, if not, this method does nothing.
+    /// The time parameter should be some continious time, for example the time since start.
+    ///
+    fn animate(&mut self, _time: f32) {}
 }
 
+use std::ops::Deref;
 impl<T: Geometry + ?Sized> Geometry for &T {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        (*self).render_with_material(material, camera, lights)
-    }
-
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        (*self).render_with_post_material(material, camera, lights, color_texture, depth_texture)
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        (*self).aabb()
-    }
+    impl_geometry_body!(deref);
 }
 
 impl<T: Geometry + ?Sized> Geometry for &mut T {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        (**self).render_with_material(material, camera, lights)
-    }
+    impl_geometry_body!(deref);
 
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        (**self).render_with_post_material(material, camera, lights, color_texture, depth_texture)
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        (**self).aabb()
+    fn animate(&mut self, time: f32) {
+        self.deref().animate(time)
     }
 }
 
 impl<T: Geometry> Geometry for Box<T> {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        self.as_ref().render_with_material(material, camera, lights)
-    }
-
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        self.as_ref().render_with_post_material(
-            material,
-            camera,
-            lights,
-            color_texture,
-            depth_texture,
-        )
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.as_ref().aabb()
-    }
+    impl_geometry_body!(as_ref);
 }
 
 impl<T: Geometry> Geometry for std::rc::Rc<T> {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        self.as_ref().render_with_material(material, camera, lights)
-    }
-
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        self.as_ref().render_with_post_material(
-            material,
-            camera,
-            lights,
-            color_texture,
-            depth_texture,
-        )
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.as_ref().aabb()
-    }
+    impl_geometry_body!(as_ref);
 }
 
 impl<T: Geometry> Geometry for std::sync::Arc<T> {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        self.as_ref().render_with_material(material, camera, lights)
-    }
-
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        self.as_ref().render_with_post_material(
-            material,
-            camera,
-            lights,
-            color_texture,
-            depth_texture,
-        )
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.as_ref().aabb()
-    }
+    impl_geometry_body!(as_ref);
 }
 
 impl<T: Geometry> Geometry for std::cell::RefCell<T> {
-    fn render_with_material(
-        &self,
-        material: &dyn Material,
-        camera: &Camera,
-        lights: &[&dyn Light],
-    ) {
-        self.borrow().render_with_material(material, camera, lights)
-    }
+    impl_geometry_body!(borrow);
 
-    fn render_with_post_material(
-        &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
-        lights: &[&dyn Light],
-        color_texture: Option<ColorTexture>,
-        depth_texture: Option<DepthTexture>,
-    ) {
-        self.borrow().render_with_post_material(
-            material,
-            camera,
-            lights,
-            color_texture,
-            depth_texture,
-        )
-    }
-
-    fn aabb(&self) -> AxisAlignedBoundingBox {
-        self.borrow().aabb()
+    fn animate(&mut self, time: f32) {
+        self.borrow_mut().animate(time)
     }
 }
 
 impl<T: Geometry> Geometry for std::sync::RwLock<T> {
+    fn draw(&self, viewer: &dyn Viewer, program: &Program, render_states: RenderStates) {
+        self.read().unwrap().draw(viewer, program, render_states)
+    }
+
+    fn vertex_shader_source(&self) -> String {
+        self.read().unwrap().vertex_shader_source()
+    }
+
+    fn id(&self) -> GeometryId {
+        self.read().unwrap().id()
+    }
+
     fn render_with_material(
         &self,
         material: &dyn Material,
-        camera: &Camera,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
     ) {
         self.read()
             .unwrap()
-            .render_with_material(material, camera, lights)
+            .render_with_material(material, viewer, lights)
     }
 
-    fn render_with_post_material(
+    fn render_with_effect(
         &self,
-        material: &dyn PostMaterial,
-        camera: &Camera,
+        material: &dyn Effect,
+        viewer: &dyn Viewer,
         lights: &[&dyn Light],
         color_texture: Option<ColorTexture>,
         depth_texture: Option<DepthTexture>,
     ) {
-        self.read().unwrap().render_with_post_material(
+        self.read().unwrap().render_with_effect(
             material,
-            camera,
+            viewer,
             lights,
             color_texture,
             depth_texture,
@@ -294,58 +236,232 @@ impl<T: Geometry> Geometry for std::sync::RwLock<T> {
     fn aabb(&self) -> AxisAlignedBoundingBox {
         self.read().unwrap().aabb()
     }
+
+    fn animate(&mut self, time: f32) {
+        self.write().unwrap().animate(time)
+    }
 }
 
-use std::collections::HashMap;
-fn vertex_buffers_from_mesh(
-    context: &Context,
-    cpu_mesh: &CpuMesh,
-) -> HashMap<String, VertexBuffer> {
-    #[cfg(debug_assertions)]
-    cpu_mesh.validate().expect("invalid cpu mesh");
+///
+/// Buffer that defines the three vertices for each triangle in a mesh.
+///
+pub enum TriangleBuffer {
+    /// Each triangle is defined by three consequitive elements in the [VertexBuffer]s.
+    /// All elements in the [VertexBuffer]s are used exactly once.
+    Unindexed {
+        /// The number of vertices to draw
+        number_of_vertices: u32,
+    },
+    /// Use an index buffer, with indices defined in `u8` format, to index into the [VertexBuffer]s.
+    /// Each triangle is defined by three consequitive indices in the [ElementBuffer].
+    /// Elements in the [VertexBuffer]s can be used multiple times.
+    IndexedU8(ElementBuffer<u8>),
+    /// Use an index buffer, with indices defined in `u16` format, to index into the [VertexBuffer]s.
+    /// Each triangle is defined by three consequitive indices in the [ElementBuffer].
+    /// Elements in the [VertexBuffer]s can be used multiple times.
+    IndexedU16(ElementBuffer<u16>),
+    /// Use an index buffer, with indices defined in `u32` format, to index into the [VertexBuffer]s.
+    /// Each triangle is defined by three consequitive indices in the [ElementBuffer].
+    /// Elements in the [VertexBuffer]s can be used multiple times.
+    IndexedU32(ElementBuffer<u32>),
+}
 
-    let mut buffers = HashMap::new();
-    buffers.insert(
-        "position".to_string(),
-        VertexBuffer::new_with_data(context, &cpu_mesh.positions.to_f32()),
-    );
-    if let Some(ref normals) = cpu_mesh.normals {
-        buffers.insert(
-            "normal".to_string(),
-            VertexBuffer::new_with_data(context, normals),
-        );
-    };
-    if let Some(ref tangents) = cpu_mesh.tangents {
-        buffers.insert(
-            "tangent".to_string(),
-            VertexBuffer::new_with_data(context, tangents),
-        );
-    };
-    if let Some(ref uvs) = cpu_mesh.uvs {
-        buffers.insert(
-            "uv_coordinates".to_string(),
-            VertexBuffer::new_with_data(
-                context,
-                &uvs.iter()
-                    .map(|uv| vec2(uv.x, 1.0 - uv.y))
-                    .collect::<Vec<_>>(),
+impl TriangleBuffer {
+    /// Create a new triangle buffer from a [CpuMesh].
+    pub fn new(context: &Context, cpu_mesh: &CpuMesh) -> Self {
+        match &cpu_mesh.indices {
+            Indices::U8(ind) => Self::IndexedU8(ElementBuffer::new_with_data(context, ind)),
+            Indices::U16(ind) => Self::IndexedU16(ElementBuffer::new_with_data(context, ind)),
+            Indices::U32(ind) => Self::IndexedU32(ElementBuffer::new_with_data(context, ind)),
+            Indices::None => Self::Unindexed {
+                number_of_vertices: cpu_mesh.vertex_count() as u32,
+            },
+        }
+    }
+
+    /// Draw the triangles defined by this buffer.
+    pub fn draw(&self, program: &Program, render_states: RenderStates, viewer: &dyn Viewer) {
+        match self {
+            Self::Unindexed { number_of_vertices } => {
+                program.draw_arrays(render_states, viewer.viewport(), *number_of_vertices)
+            }
+            Self::IndexedU8(element_buffer) => {
+                program.draw_elements(render_states, viewer.viewport(), element_buffer)
+            }
+            Self::IndexedU16(element_buffer) => {
+                program.draw_elements(render_states, viewer.viewport(), element_buffer)
+            }
+            Self::IndexedU32(element_buffer) => {
+                program.draw_elements(render_states, viewer.viewport(), element_buffer)
+            }
+        }
+    }
+
+    /// Draw multiple instances of the triangles defined by this buffer.
+    pub fn draw_instanced(
+        &self,
+        program: &Program,
+        render_states: RenderStates,
+        viewer: &dyn Viewer,
+        instance_count: u32,
+    ) {
+        match self {
+            Self::Unindexed { number_of_vertices } => program.draw_arrays_instanced(
+                render_states,
+                viewer.viewport(),
+                *number_of_vertices,
+                instance_count,
             ),
-        );
-    };
-    if let Some(ref colors) = cpu_mesh.colors {
-        buffers.insert(
-            "color".to_string(),
-            VertexBuffer::new_with_data(context, colors),
-        );
-    };
-    buffers
+            Self::IndexedU8(element_buffer) => program.draw_elements_instanced(
+                render_states,
+                viewer.viewport(),
+                element_buffer,
+                instance_count,
+            ),
+            Self::IndexedU16(element_buffer) => program.draw_elements_instanced(
+                render_states,
+                viewer.viewport(),
+                element_buffer,
+                instance_count,
+            ),
+            Self::IndexedU32(element_buffer) => program.draw_elements_instanced(
+                render_states,
+                viewer.viewport(),
+                element_buffer,
+                instance_count,
+            ),
+        }
+    }
+
+    /// Returns the number of vertices defined by this buffer.
+    pub fn vertex_count(&self) -> u32 {
+        match self {
+            Self::Unindexed { number_of_vertices } => *number_of_vertices,
+            Self::IndexedU8(element_buffer) => element_buffer.count(),
+            Self::IndexedU16(element_buffer) => element_buffer.count(),
+            Self::IndexedU32(element_buffer) => element_buffer.count(),
+        }
+    }
+
+    /// Returns the number of triangles defined by this buffer.
+    pub fn triangle_count(&self) -> u32 {
+        self.vertex_count() / 3
+    }
 }
 
-fn index_buffer_from_mesh(context: &Context, cpu_mesh: &CpuMesh) -> Option<ElementBuffer> {
-    match &cpu_mesh.indices {
-        Indices::U8(ind) => Some(ElementBuffer::new_with_data(context, ind)),
-        Indices::U16(ind) => Some(ElementBuffer::new_with_data(context, ind)),
-        Indices::U32(ind) => Some(ElementBuffer::new_with_data(context, ind)),
-        Indices::None => None,
+struct BaseMesh {
+    indices: TriangleBuffer,
+    positions: VertexBuffer<Vec3>,
+    normals: Option<VertexBuffer<Vec3>>,
+    tangents: Option<VertexBuffer<Vec4>>,
+    uvs: Option<VertexBuffer<Vec2>>,
+    colors: Option<VertexBuffer<Vec4>>,
+}
+
+impl BaseMesh {
+    pub fn new(context: &Context, cpu_mesh: &CpuMesh) -> Self {
+        #[cfg(debug_assertions)]
+        cpu_mesh.validate().expect("invalid cpu mesh");
+
+        Self {
+            indices: TriangleBuffer::new(context, cpu_mesh),
+            positions: VertexBuffer::new_with_data(context, &cpu_mesh.positions.to_f32()),
+            normals: cpu_mesh
+                .normals
+                .as_ref()
+                .map(|data| VertexBuffer::new_with_data(context, data)),
+            tangents: cpu_mesh
+                .tangents
+                .as_ref()
+                .map(|data| VertexBuffer::new_with_data(context, data)),
+            uvs: cpu_mesh.uvs.as_ref().map(|data| {
+                VertexBuffer::new_with_data(
+                    context,
+                    &data
+                        .iter()
+                        .map(|uv| vec2(uv.x, 1.0 - uv.y))
+                        .collect::<Vec<_>>(),
+                )
+            }),
+            colors: cpu_mesh.colors.as_ref().map(|data| {
+                VertexBuffer::new_with_data(
+                    context,
+                    &data.iter().map(|c| c.to_linear_srgb()).collect::<Vec<_>>(),
+                )
+            }),
+        }
+    }
+
+    pub fn draw(&self, program: &Program, render_states: RenderStates, viewer: &dyn Viewer) {
+        self.use_attributes(program);
+        self.indices.draw(program, render_states, viewer);
+    }
+
+    pub fn draw_instanced(
+        &self,
+        program: &Program,
+        render_states: RenderStates,
+        viewer: &dyn Viewer,
+        instance_count: u32,
+    ) {
+        self.use_attributes(program);
+        self.indices
+            .draw_instanced(program, render_states, viewer, instance_count);
+    }
+
+    fn use_attributes(&self, program: &Program) {
+        program.use_vertex_attribute("position", &self.positions);
+
+        if program.requires_attribute("normal") {
+            if let Some(normals) = &self.normals {
+                program.use_vertex_attribute("normal", normals);
+            }
+        }
+
+        if program.requires_attribute("tangent") {
+            if let Some(tangents) = &self.tangents {
+                program.use_vertex_attribute("tangent", tangents);
+            }
+        }
+
+        if program.requires_attribute("uv_coordinates") {
+            if let Some(uvs) = &self.uvs {
+                program.use_vertex_attribute("uv_coordinates", uvs);
+            }
+        }
+
+        if program.requires_attribute("color") {
+            if let Some(colors) = &self.colors {
+                program.use_vertex_attribute("color", colors);
+            }
+        }
+    }
+
+    fn vertex_shader_source(&self) -> String {
+        format!(
+            "{}{}{}{}{}{}",
+            if self.normals.is_some() {
+                "#define USE_NORMALS\n"
+            } else {
+                ""
+            },
+            if self.tangents.is_some() {
+                "#define USE_TANGENTS\n"
+            } else {
+                ""
+            },
+            if self.uvs.is_some() {
+                "#define USE_UVS\n"
+            } else {
+                ""
+            },
+            if self.colors.is_some() {
+                "#define USE_VERTEX_COLORS\n"
+            } else {
+                ""
+            },
+            include_str!("../core/shared.frag"),
+            include_str!("geometry/shaders/mesh.vert"),
+        )
     }
 }
