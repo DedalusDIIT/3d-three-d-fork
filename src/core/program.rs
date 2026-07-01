@@ -525,11 +525,11 @@ impl Program {
     /// Draws lines and is copied and modified from: draw_subset_of_elements()
     /// Currently local implementation in our fork.
     ///
-    pub fn draw_lines(
+    pub fn draw_lines<T: ElementBufferDataType>(
         &self,
         render_states: RenderStates,
         viewport: Viewport,
-        element_buffer: &ElementBuffer,
+        element_buffer: &ElementBuffer<T>,
         first: u32,
         count: u32,
     ) {
@@ -541,7 +541,7 @@ impl Program {
             self.context.draw_elements(
                 crate::context::LINES,
                 count as i32,
-                element_buffer.data_type(),
+                T::data_type(),
                 first as i32,
             );
             self.context
@@ -564,11 +564,11 @@ impl Program {
     /// Draws triangle_strip and is copied and modified from: draw_subset_of_elements()
     /// Currently local implementation in our fork.
     ///
-pub fn draw_triangle_strip(
+    pub fn draw_triangle_strip<T: ElementBufferDataType>(
         &self,
         render_states: RenderStates,
         viewport: Viewport,
-        element_buffer: &ElementBuffer,
+        element_buffer: &ElementBuffer<T>,
         first: u32,
         count: u32,
     ) {
@@ -580,7 +580,7 @@ pub fn draw_triangle_strip(
             self.context.draw_elements(
                 crate::context::TRIANGLE_STRIP,
                 count as i32,
-                element_buffer.data_type(),
+                T::data_type(),
                 first as i32,
             );
             self.context

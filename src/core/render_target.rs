@@ -235,7 +235,7 @@ impl<'a> RenderTarget<'a> {
                 scissor_box.height as i32,
                 format_from_data_type::<T>(),
                 T::data_type(),
-                crate::context::PixelPackData::Slice(&mut bytes),
+                crate::context::PixelPackData::Slice(Some(&mut bytes)),
             );
         }
         let mut pixels = from_byte_slice(&bytes).to_vec();
