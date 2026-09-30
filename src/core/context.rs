@@ -20,6 +20,25 @@ pub struct Context {
 }
 
 impl Context {
+    /// Runs a callback with a shader program cached by its source code.
+    pub fn program(
+        &self,
+        vertex_shader_source: &str,
+        fragment_shader_source: &str,
+        callback: impl FnOnce(&Program),
+    ) -> Result<(), CoreError> {
+        let mut key = b"duvr\0".to_vec();
+        key.extend_from_slice(vertex_shader_source.as_bytes());
+        key.push(0);
+        key.extend_from_slice(fragment_shader_source.as_bytes());
+        if !self.programs.read().unwrap().contains_key(&key) {
+            let program = Program::from_source(self, vertex_shader_source, fragment_shader_source)?;
+            self.programs.write().unwrap().insert(key.clone(), program);
+        }
+        callback(self.programs.read().unwrap().get(&key).unwrap());
+        Ok(())
+    }
+
     ///
     /// Creates a new mid-level context, used in this [core](crate::core) module, from a low-level OpenGL/WebGL context from the [context](crate::context) module.
     /// This should only be called directly if you are creating a low-level context yourself (ie. not using the features in the [window](crate::window) module).

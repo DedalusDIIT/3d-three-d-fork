@@ -23,7 +23,7 @@ egui-gui = ["egui_glow", "egui", "getrandom"] # Additional GUI features
 text = ["swash", "lyon"] # Text mesh generation features
 
 [dependencies]
-glow = "0.16"
+glow = "0.17"
 cgmath = "0.18"
 three-d-asset = {git = "https://github.com/asny/three-d-asset"}
 thiserror = "2"

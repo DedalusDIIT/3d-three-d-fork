@@ -284,6 +284,14 @@ impl Program {
         }
     }
 
+    /// Binds a texture created through the low-level graphics context.
+    pub fn use_texture_id(&self, name: &str, texture: crate::context::Texture, target: u32) {
+        self.use_texture_internal(name);
+        unsafe {
+            self.context.bind_texture(target, Some(texture));
+        }
+    }
+
     fn use_texture_internal(&self, name: &str) -> u32 {
         if !self.textures.read().unwrap().contains_key(name) {
             let mut map = self.textures.write().unwrap();
@@ -518,17 +526,70 @@ impl Program {
         first: u32,
         count: u32,
     ) {
+        self.draw_subset_with_mode(
+            render_states,
+            viewport,
+            element_buffer,
+            first,
+            count,
+            crate::context::TRIANGLES,
+        );
+    }
+
+    /// Draws a subset of the given element buffer as lines.
+    pub fn draw_lines<T: ElementBufferDataType>(
+        &self,
+        render_states: RenderStates,
+        viewport: Viewport,
+        element_buffer: &ElementBuffer<T>,
+        first: u32,
+        count: u32,
+    ) {
+        self.draw_subset_with_mode(
+            render_states,
+            viewport,
+            element_buffer,
+            first,
+            count,
+            crate::context::LINES,
+        );
+    }
+
+    /// Draws a subset of the given element buffer as a triangle strip.
+    pub fn draw_triangle_strip<T: ElementBufferDataType>(
+        &self,
+        render_states: RenderStates,
+        viewport: Viewport,
+        element_buffer: &ElementBuffer<T>,
+        first: u32,
+        count: u32,
+    ) {
+        self.draw_subset_with_mode(
+            render_states,
+            viewport,
+            element_buffer,
+            first,
+            count,
+            crate::context::TRIANGLE_STRIP,
+        );
+    }
+
+    fn draw_subset_with_mode<T: ElementBufferDataType>(
+        &self,
+        render_states: RenderStates,
+        viewport: Viewport,
+        element_buffer: &ElementBuffer<T>,
+        first: u32,
+        count: u32,
+        mode: u32,
+    ) {
         self.context.set_viewport(viewport);
         self.context.set_render_states(render_states);
         self.use_program();
         element_buffer.bind();
         unsafe {
-            self.context.draw_elements(
-                crate::context::TRIANGLES,
-                count as i32,
-                T::data_type(),
-                first as i32,
-            );
+            self.context
+                .draw_elements(mode, count as i32, T::data_type(), first as i32);
             self.context
                 .bind_buffer(crate::context::ELEMENT_ARRAY_BUFFER, None);
 

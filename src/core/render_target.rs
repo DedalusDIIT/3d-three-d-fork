@@ -146,6 +146,50 @@ impl<'a> RenderTarget<'a> {
         self.read_color_partially(self.scissor_box())
     }
 
+    /// Reads the framebuffer color without requiring a managed color attachment.
+    pub fn read_framebuffer<T: TextureDataType>(&self, flipy: bool) -> Vec<T> {
+        self.read_framebuffer_partially(self.scissor_box(), flipy)
+    }
+
+    /// Reads the framebuffer color in a scissor box, optionally flipping its rows.
+    pub fn read_framebuffer_partially<T: TextureDataType>(
+        &self,
+        scissor_box: ScissorBox,
+        flipy: bool,
+    ) -> Vec<T> {
+        if self.id.is_none() {
+            panic!("cannot read color from undefined framebuffer");
+        }
+        self.bind(crate::context::DRAW_FRAMEBUFFER);
+        self.bind(crate::context::READ_FRAMEBUFFER);
+        let mut data_size = std::mem::size_of::<T>();
+        if data_size / T::size() as usize == 1 {
+            data_size *= 4 / T::size() as usize;
+        }
+        let mut bytes =
+            vec![0u8; scissor_box.width as usize * scissor_box.height as usize * data_size];
+        unsafe {
+            self.context.read_pixels(
+                scissor_box.x,
+                scissor_box.y,
+                scissor_box.width as i32,
+                scissor_box.height as i32,
+                format_from_data_type::<T>(),
+                T::data_type(),
+                crate::context::PixelPackData::Slice(Some(&mut bytes)),
+            );
+        }
+        let mut pixels = from_byte_slice(&bytes).to_vec();
+        if flipy {
+            flip_y(
+                &mut pixels,
+                scissor_box.width as usize,
+                scissor_box.height as usize,
+            );
+        }
+        pixels
+    }
+
     ///
     /// Returns the colors of the pixels in this render target inside the given scissor box.
     /// The number of channels per pixel and the data format for each channel returned from this function is specified by the generic parameter `T`.
